@@ -439,7 +439,7 @@ export function VideoCard({ video, isLocked = false, onPay }: VideoCardProps) {
       </div>
       
       {!locked && (
-        <div className="absolute right-[calc(0.5rem+env(safe-area-inset-right))] bottom-[calc(7rem+env(safe-area-inset-bottom))] flex flex-col items-center gap-4">
+        <div className="absolute right-0 bottom-[calc(5rem+env(safe-area-inset-bottom))] flex flex-col items-end gap-3">
         <Link href={`/u/${video.user.id}`}>
           <Avatar className="h-12 w-12 border-2 border-primary">
             <AvatarImage src={video.user.avatarUrl} alt={video.user.username} />
@@ -451,10 +451,10 @@ export function VideoCard({ video, isLocked = false, onPay }: VideoCardProps) {
           <Button
             variant="ghost"
             size="icon"
-            className="rounded-full h-16 w-16 text-white hover:bg-white/10 hover:text-white"
+            className="rounded-full h-16 w-16 p-0 text-white hover:bg-white/10 hover:text-white"
             onClick={toggleMute}
           >
-            {isMuted ? <VolumeX className="h-10 w-10" /> : <Volume2 className="h-10 w-10" />}
+            {isMuted ? <VolumeX className="h-16 w-16" /> : <Volume2 className="h-16 w-16" />}
           </Button>
         </div>
 
@@ -462,7 +462,7 @@ export function VideoCard({ video, isLocked = false, onPay }: VideoCardProps) {
           <Button
             variant="ghost"
             size="icon"
-            className="rounded-full h-20 w-20 text-white hover:bg-white/10 hover:text-white"
+            className="rounded-full h-16 w-16 p-0 text-white hover:bg-white/10 hover:text-white"
             onClick={(e) => {
               e.stopPropagation()
               handleLike(e)
@@ -470,14 +470,14 @@ export function VideoCard({ video, isLocked = false, onPay }: VideoCardProps) {
           >
             <Heart
               className={cn(
-                'h-14 w-14 transition-all',
+                'h-16 w-16 transition-all',
                 isLiked
                   ? 'fill-primary text-primary drop-shadow-glow-primary'
                   : ''
               )}
             />
           </Button>
-          <span className="text-sm font-medium text-white">
+          <span className="text-sm font-medium text-white text-right">
             <ClientFormattedNumber value={likes} />
           </span>
         </div>
@@ -486,15 +486,15 @@ export function VideoCard({ video, isLocked = false, onPay }: VideoCardProps) {
           <Button 
             variant="ghost" 
             size="icon" 
-            className="rounded-full h-20 w-20 text-white hover:bg-white/10 hover:text-white"
+            className="rounded-full h-16 w-16 p-0 text-white hover:bg-white/10 hover:text-white"
             onClick={(e) => {
               e.stopPropagation()
               handleComments(e)
             }}
           >
-            <MessageCircle className="h-14 w-14" />
+            <MessageCircle className="h-16 w-16" />
           </Button>
-          <span className="text-sm font-medium text-white">
+          <span className="text-sm font-medium text-white text-right">
             <ClientFormattedNumber value={commentCount} />
           </span>
         </div>
@@ -503,15 +503,15 @@ export function VideoCard({ video, isLocked = false, onPay }: VideoCardProps) {
           <Button 
             variant="ghost" 
             size="icon" 
-            className="rounded-full h-20 w-20 text-white hover:bg-white/10 hover:text-white"
+            className="rounded-full h-16 w-16 p-0 text-white hover:bg-white/10 hover:text-white"
             onClick={(e) => {
               e.stopPropagation()
               handleShare(e)
             }}
           >
-            <Send className="h-14 w-14" />
+            <Send className="h-16 w-16" />
           </Button>
-          <span className="text-sm font-medium text-white">
+          <span className="text-sm font-medium text-white text-right">
             <ClientFormattedNumber value={video.shares} />
           </span>
         </div>

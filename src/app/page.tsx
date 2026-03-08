@@ -58,7 +58,7 @@ function VideoCardSkeleton() {
         <div className="h-3 w-3/4 rounded-full bg-white/10" />
         <div className="h-3 w-1/2 rounded-full bg-white/10" />
       </div>
-      <div className="absolute right-[calc(0.5rem+env(safe-area-inset-right))] bottom-[calc(7rem+env(safe-area-inset-bottom))] flex flex-col items-center gap-4">
+      <div className="absolute right-0 bottom-[calc(7rem+env(safe-area-inset-bottom))] flex flex-col items-center gap-4">
         <div className="h-12 w-12 rounded-full bg-white/10" />
         <div className="h-10 w-10 rounded-full bg-white/10" />
         <div className="h-10 w-10 rounded-full bg-white/10" />
@@ -340,7 +340,7 @@ export default function Home() {
 
   if (loading) {
     return (
-      <div className="mx-auto w-full max-w-[520px] md:max-w-[640px]">
+      <div className="w-full md:mx-auto md:max-w-[640px]">
         {Array.from({ length: 2 }).map((_, index) => (
           <VideoCardSkeleton key={`skeleton-${index}`} />
         ))}
@@ -349,7 +349,7 @@ export default function Home() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[520px] md:max-w-[640px]">
+    <div className="w-full md:mx-auto md:max-w-[640px]">
       {videos.map((video) => {
         const ownerId = (video.userRef as any)?.id ?? video.user?.id;
         const isOwner = authUser && ownerId === authUser.uid;
