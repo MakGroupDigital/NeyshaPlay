@@ -1,0 +1,12 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // ⚠️ RÈGLES DE DÉVELOPPEMENT - PERMISSIVES ⚠️
+    // À SÉCURISER AVANT LA PRODUCTION !
+    
+    match /{allPaths=**} {
+      allow read, write: if true;
+    }
+  }
+}

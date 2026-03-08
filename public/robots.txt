@@ -1,0 +1,10 @@
+# robots.txt for NeyshaPlay
+User-agent: *
+Allow: /
+
+# Disallow admin and private pages
+Disallow: /api/
+Disallow: /admin/
+
+# Sitemap
+Sitemap: https://neyshaplay.com/sitemap.xml

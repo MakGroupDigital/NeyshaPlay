@@ -1,0 +1,123 @@
+{
+    "entities": {
+        "user": {
+            "title": "User",
+            "description": "A user of the application.",
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "The user's name."
+                },
+                "username": {
+                    "type": "string",
+                    "description": "The user's unique username."
+                },
+                "email": {
+                    "type": "string",
+                    "description": "The user's email address.",
+                    "format": "email"
+                },
+                "avatarUrl": {
+                    "type": "string",
+                    "description": "URL of the user's profile picture."
+                },
+                "bio": {
+                    "type": "string",
+                    "description": "The user's biography."
+                },
+                "following": {
+                    "type": "number",
+                    "description": "Number of users this user is following."
+                },
+                "followers": {
+                    "type": "number",
+                    "description": "Number of followers this user has."
+                },
+                "likes": {
+                    "type": "number",
+                    "description": "Total number of likes received by the user."
+                },
+                "role": {
+                    "type": "string",
+                    "description": "The role of the user.",
+                    "enum": [
+                        "user",
+                        "creator"
+                    ]
+                }
+            },
+            "required": [
+                "name",
+                "username",
+                "email",
+                "role"
+            ]
+        },
+        "video": {
+            "title": "Video",
+            "description": "A video post in the application.",
+            "type": "object",
+            "properties": {
+                "userRef": {
+                    "type": "string",
+                    "description": "A reference to the user document who posted the video."
+                },
+                "videoUrl": {
+                    "type": "string",
+                    "description": "URL of the video file in Firebase Storage."
+                },
+                "thumbnailUrl": {
+                    "type": "string",
+                    "description": "URL of the video thumbnail."
+                },
+                "description": {
+                    "type": "string",
+                    "description": "The description or caption of the video."
+                },
+                "song": {
+                    "type": "string",
+                    "description": "Name of the song used in the video."
+                },
+                "likes": {
+                    "type": "number",
+                    "description": "Number of likes the video has."
+                },
+                "comments": {
+                    "type": "number",
+                    "description": "Number of comments on the video."
+                },
+                "shares": {
+                    "type": "number",
+                    "description": "Number of times the video has been shared."
+                }
+            },
+            "required": [
+                "userRef",
+                "videoUrl"
+            ]
+        }
+    },
+    "auth": {
+        "providers": [
+            "anonymous",
+            "google.com",
+            "password",
+            "phone"
+        ]
+    },
+    "firestore": {
+        "/users/{userId}": {
+            "schema": {
+                "$ref": "#/entities/user"
+            },
+            "description": "A collection of all the users in the application."
+        },
+        "/videos/{videoId}": {
+            "schema": {
+                "$ref": "#/entities/video"
+            },
+            "description": "A collection of all the videos in the application."
+        }
+    }
+}
