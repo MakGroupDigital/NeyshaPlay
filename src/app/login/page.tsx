@@ -32,7 +32,7 @@ export default function LoginPage() {
   const [pendingUser, setPendingUser] = useState<any>(null)
   const [isCreatingProfile, setIsCreatingProfile] = useState(false)
 
-  const createUserProfile = async (user: any, role: UserRole) => {
+  const createUserProfile = async (user: any, role: UserRole, gender: 'male' | 'female', feedGender: 'male' | 'female' | 'all') => {
     if (!firestore) return
 
     setIsCreatingProfile(true)
@@ -50,6 +50,8 @@ export default function LoginPage() {
         following: 0,
         likes: 0,
         role: role,
+        gender: gender,
+        feedGender: feedGender,
         createdAt: serverTimestamp()
       }
 
@@ -110,9 +112,9 @@ export default function LoginPage() {
     }
   }
 
-  const handleRoleSelect = async (role: UserRole) => {
+  const handleRoleSelect = async (role: UserRole, gender: 'male' | 'female', feedGender: 'male' | 'female' | 'all') => {
     if (pendingUser) {
-      await createUserProfile(pendingUser, role)
+      await createUserProfile(pendingUser, role, gender, feedGender)
     }
   }
 

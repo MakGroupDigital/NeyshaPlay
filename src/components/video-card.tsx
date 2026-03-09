@@ -29,12 +29,14 @@ import {
   updateDoc,
 } from 'firebase/firestore'
 
-type PaymentMethod = 'mobile-money' | 'card' | 'wallet'
+type PaymentMethod = 'mobile-money' | 'card' | 'wallet' | 'paypal'
 
 type VideoCardProps = {
   video: Video
   isLocked?: boolean
   onPay?: (video: Video, method: PaymentMethod) => Promise<void> | void
+  globalMuted?: boolean
+  onMuteToggle?: (muted: boolean) => void
 }
 
 type VideoComment = {
@@ -46,14 +48,13 @@ type VideoComment = {
   createdAt?: Date
 }
 
-export function VideoCard({ video, isLocked = false, onPay }: VideoCardProps) {
+export function VideoCard({ video, isLocked = false, onPay, globalMuted = true, onMuteToggle }: VideoCardProps) {
   const firestore = useFirestore()
   const { user: authUser } = useUser()
   const router = useRouter()
   const { toast } = useToast()
   const [isLiked, setIsLiked] = useState(false)
   const [likes, setLikes] = useState(video.likes)
-  const [isMuted, setIsMuted] = useState(true)
   const [isPlaying, setIsPlaying] = useState(false)
   const [showPaySheet, setShowPaySheet] = useState(false)
   const [showComments, setShowComments] = useState(false)
@@ -65,6 +66,7 @@ export function VideoCard({ video, isLocked = false, onPay }: VideoCardProps) {
   const [isPaying, setIsPaying] = useState(false)
   const [localUnlocked, setLocalUnlocked] = useState(false)
   const [likeBursts, setLikeBursts] = useState<Array<{ id: string; x: number; y: number }>>([])
+  const isPaypal = paymentMethod === 'paypal'
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const numericPrice = typeof video.price === 'number' ? video.price : Number(video.price || 0)
@@ -223,10 +225,7 @@ export function VideoCard({ video, isLocked = false, onPay }: VideoCardProps) {
   const toggleMute = (e: React.MouseEvent) => {
     e.stopPropagation() // prevent video from pausing/playing
     if (locked) return
-    if (videoRef.current) {
-        videoRef.current.muted = !videoRef.current.muted
-        setIsMuted(videoRef.current.muted)
-    }
+    onMuteToggle?.(!globalMuted)
   }
   
   const handleVideoClick = () => {
@@ -244,6 +243,13 @@ export function VideoCard({ video, isLocked = false, onPay }: VideoCardProps) {
         }
     }
   }
+
+  // Synchroniser le mute avec globalMuted
+  useEffect(() => {
+    if (videoRef.current && !locked) {
+      videoRef.current.muted = globalMuted
+    }
+  }, [globalMuted, locked])
 
   useEffect(() => {
     const videoElement = videoRef.current;
@@ -335,14 +341,21 @@ export function VideoCard({ video, isLocked = false, onPay }: VideoCardProps) {
     if (!isPaidContent) return
 
     setIsPaying(true)
-    setLocalUnlocked(true)
-    setShowPaySheet(false)
+    if (!isPaypal) {
+      setLocalUnlocked(true)
+      setShowPaySheet(false)
+    }
 
     try {
       await onPay?.(video, paymentMethod)
+      if (isPaypal) {
+        setShowPaySheet(false)
+      }
     } catch (error) {
       console.error('Payment failed:', error)
-      setLocalUnlocked(false)
+      if (!isPaypal) {
+        setLocalUnlocked(false)
+      }
       setShowPaySheet(true)
     } finally {
       setIsPaying(false)
@@ -375,7 +388,7 @@ export function VideoCard({ video, isLocked = false, onPay }: VideoCardProps) {
           loop
           playsInline
           preload="metadata"
-          muted={isMuted}
+          muted={globalMuted}
           data-ai-hint="short-form video"
         />
       ) : (
@@ -454,7 +467,7 @@ export function VideoCard({ video, isLocked = false, onPay }: VideoCardProps) {
             className="rounded-full h-16 w-16 p-0 text-white hover:bg-white/10 hover:text-white"
             onClick={toggleMute}
           >
-            {isMuted ? <VolumeX className="h-16 w-16" /> : <Volume2 className="h-16 w-16" />}
+            {globalMuted ? <VolumeX className="h-16 w-16" /> : <Volume2 className="h-16 w-16" />}
           </Button>
         </div>
 
@@ -593,7 +606,7 @@ export function VideoCard({ video, isLocked = false, onPay }: VideoCardProps) {
           onClick={() => setShowPaySheet(false)}
         >
           <div
-            className="w-full rounded-t-3xl bg-background p-5 text-foreground"
+            className="w-full rounded-t-3xl bg-background p-5 pb-[calc(6rem+env(safe-area-inset-bottom))] text-foreground"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-center justify-between">
@@ -611,6 +624,18 @@ export function VideoCard({ video, isLocked = false, onPay }: VideoCardProps) {
               value={paymentMethod}
               onValueChange={(value) => setPaymentMethod(value as PaymentMethod)}
             >
+              <label className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-5 w-5 rounded-md bg-primary/20 text-primary flex items-center justify-center text-[10px] font-bold">
+                    P
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">PayPal</p>
+                    <p className="text-xs text-muted-foreground">PayPal, carte, Apple Pay*</p>
+                  </div>
+                </div>
+                <RadioGroupItem value="paypal" />
+              </label>
               <label className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3">
                 <div className="flex items-center gap-3">
                   <Smartphone className="h-5 w-5 text-primary" />

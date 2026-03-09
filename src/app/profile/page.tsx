@@ -9,10 +9,26 @@ import { useUser } from '@/firebase'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { useFirestore } from '@/firebase/provider'
-import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore'
+import { doc, getDoc, collection, query, where, getDocs, deleteDoc, updateDoc } from 'firebase/firestore'
 import type { User, Video } from '@/lib/types'
-import { Settings, UserPlus, Users, Heart, X, Play, Pause, Volume2, VolumeX, Share2, Copy, QrCode } from 'lucide-react'
+import { Settings, UserPlus, Users, Heart, X, Play, Pause, Volume2, VolumeX, Share2, Copy, QrCode, MoreVertical, Trash2, Edit } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 
 export default function ProfilePage() {
   const { user, loading: userLoading } = useUser()
@@ -30,6 +46,12 @@ export default function ProfilePage() {
   const [duration, setDuration] = useState(0)
   const [profileUrl, setProfileUrl] = useState('')
   const [qrCodeUrl, setQrCodeUrl] = useState('')
+  const [editingVideo, setEditingVideo] = useState<Video | null>(null)
+  const [editDescription, setEditDescription] = useState('')
+  const [editSong, setEditSong] = useState('')
+  const [deleteConfirmVideo, setDeleteConfirmVideo] = useState<Video | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
 
   useEffect(() => {
@@ -134,6 +156,63 @@ export default function ProfilePage() {
     setProgress(0)
     if (videoRef.current) {
       videoRef.current.pause()
+    }
+  }
+
+  const handleDeleteVideo = async () => {
+    if (!deleteConfirmVideo || !firestore) return
+    
+    setIsDeleting(true)
+    try {
+      await deleteDoc(doc(firestore, 'videos', deleteConfirmVideo.id))
+      setUserVideos((prev) => prev.filter((v) => v.id !== deleteConfirmVideo.id))
+      toast({ title: 'Vidéo supprimée' })
+      setDeleteConfirmVideo(null)
+    } catch (error) {
+      console.error('Delete error:', error)
+      toast({
+        title: 'Erreur',
+        description: 'Impossible de supprimer la vidéo',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  const handleEditVideo = (video: Video) => {
+    setEditingVideo(video)
+    setEditDescription(video.description)
+    setEditSong(video.song || '')
+  }
+
+  const handleSaveEdit = async () => {
+    if (!editingVideo || !firestore) return
+    
+    setIsSaving(true)
+    try {
+      await updateDoc(doc(firestore, 'videos', editingVideo.id), {
+        description: editDescription,
+        song: editSong,
+      })
+      setUserVideos((prev) =>
+        prev.map((v) =>
+          v.id === editingVideo.id
+            ? { ...v, description: editDescription, song: editSong }
+            : v
+        )
+      )
+      toast({ title: 'Vidéo mise à jour' })
+      setEditingVideo(null)
+    } catch (error) {
+      console.error('Update error:', error)
+      toast({
+        title: 'Erreur',
+        description: 'Impossible de mettre à jour la vidéo',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -274,10 +353,9 @@ export default function ProfilePage() {
             {userVideos.map((video) => (
               <Card
                 key={video.id}
-                className="overflow-hidden aspect-[3/4] border-0 rounded-none cursor-pointer"
-                onClick={() => handleOpenVideo(video)}
+                className="overflow-hidden aspect-[3/4] border-0 rounded-none cursor-pointer relative group"
               >
-                <div className="relative h-full w-full">
+                <div className="relative h-full w-full" onClick={() => handleOpenVideo(video)}>
                   <Image
                     src={video.thumbnailUrl}
                     alt={video.description}
@@ -285,6 +363,33 @@ export default function ProfilePage() {
                     className="object-cover"
                     data-ai-hint="user video"
                   />
+                </div>
+                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="secondary"
+                        size="icon"
+                        className="h-8 w-8 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-sm"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => handleEditVideo(video)}>
+                        <Edit className="h-4 w-4 mr-2" />
+                        Modifier
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setDeleteConfirmVideo(video)}
+                        className="text-red-500 focus:text-red-500"
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Supprimer
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </Card>
             ))}
@@ -366,6 +471,65 @@ export default function ProfilePage() {
           </div>
         </div>
       )}
+
+      {/* Dialog de modification */}
+      <Dialog open={!!editingVideo} onOpenChange={(open) => !open && setEditingVideo(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Modifier la vidéo</DialogTitle>
+            <DialogDescription>
+              Modifiez la description et la musique de votre vidéo
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Description</label>
+              <Textarea
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                placeholder="Description de la vidéo..."
+                rows={3}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Musique</label>
+              <Input
+                value={editSong}
+                onChange={(e) => setEditSong(e.target.value)}
+                placeholder="Nom de la musique..."
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingVideo(null)} disabled={isSaving}>
+              Annuler
+            </Button>
+            <Button onClick={handleSaveEdit} disabled={isSaving}>
+              {isSaving ? 'Enregistrement...' : 'Enregistrer'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de confirmation de suppression */}
+      <Dialog open={!!deleteConfirmVideo} onOpenChange={(open) => !open && setDeleteConfirmVideo(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Supprimer la vidéo</DialogTitle>
+            <DialogDescription>
+              Êtes-vous sûr de vouloir supprimer cette vidéo ? Cette action est irréversible.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteConfirmVideo(null)} disabled={isDeleting}>
+              Annuler
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteVideo} disabled={isDeleting}>
+              {isDeleting ? 'Suppression...' : 'Supprimer'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

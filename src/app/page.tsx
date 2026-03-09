@@ -84,6 +84,7 @@ export default function Home() {
   const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [unlockedMap, setUnlockedMap] = useState<Record<string, boolean>>({});
   const [feedGender, setFeedGender] = useState<'female' | 'male' | 'all' | null>(null);
+  const [globalMuted, setGlobalMuted] = useState(true); // État global du son
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const userCache = useRef<Map<string, User>>(new Map());
   const migratedRef = useRef<Set<string>>(new Set());
@@ -356,12 +357,40 @@ export default function Home() {
   }, [firestore, videos]);
 
   const handlePay = useCallback(
-    async (video: Video, method: 'mobile-money' | 'card' | 'wallet') => {
+    async (video: Video, method: 'mobile-money' | 'card' | 'wallet' | 'paypal') => {
       if (!authUser) {
         router.push('/login');
         return;
       }
       if (!firestore) return;
+
+      if (method === 'paypal') {
+        try {
+          const response = await fetch('/api/paypal/create-order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              videoId: video.id,
+              amount: Number(video.price ?? 0),
+              currency: video.currency ?? 'USD',
+            }),
+          })
+          const data = await response.json()
+          if (!response.ok || !data?.approveUrl) {
+            throw new Error(data?.error || 'PayPal order failed')
+          }
+          window.location.href = data.approveUrl as string
+          return
+        } catch (error) {
+          console.error('PayPal error:', error)
+          toast({
+            title: 'Paiement PayPal échoué',
+            description: 'Veuillez réessayer.',
+            variant: 'destructive',
+          })
+          throw error
+        }
+      }
 
       setUnlockedMap((prev) => ({ ...prev, [video.id]: true }));
 
@@ -495,6 +524,8 @@ export default function Home() {
               video={video}
               isLocked={isLocked}
               onPay={handlePay}
+              globalMuted={globalMuted}
+              onMuteToggle={setGlobalMuted}
             />
           );
         })}

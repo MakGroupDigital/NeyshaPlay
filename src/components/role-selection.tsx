@@ -4,17 +4,20 @@ import { useState } from 'react'
 import Image from 'next/image'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Check, Video, User as UserIcon } from 'lucide-react'
+import { Check, Video, User as UserIcon, Users, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { UserRole } from '@/lib/types'
 
 interface RoleSelectionProps {
-  onRoleSelect: (role: UserRole) => void
+  onRoleSelect: (role: UserRole, gender: 'male' | 'female', feedGender: 'male' | 'female' | 'all') => void
   isLoading?: boolean
 }
 
 export function RoleSelection({ onRoleSelect, isLoading }: RoleSelectionProps) {
+  const [step, setStep] = useState<'role' | 'gender' | 'feed'>('role')
   const [selectedRole, setSelectedRole] = useState<UserRole | null>(null)
+  const [selectedGender, setSelectedGender] = useState<'male' | 'female' | null>(null)
+  const [selectedFeedGender, setSelectedFeedGender] = useState<'male' | 'female' | 'all' | null>(null)
 
   const roles = [
     {
@@ -45,9 +48,32 @@ export function RoleSelection({ onRoleSelect, isLoading }: RoleSelectionProps) {
     }
   ]
 
-  const handleConfirm = () => {
+  const genders = [
+    { value: 'male' as const, title: 'Homme', color: 'blue' },
+    { value: 'female' as const, title: 'Femme', color: 'pink' }
+  ]
+
+  const feedPreferences = [
+    { value: 'female' as const, title: 'Créatrices', description: 'Voir principalement du contenu de créatrices', color: 'pink' },
+    { value: 'male' as const, title: 'Créateurs', description: 'Voir principalement du contenu de créateurs', color: 'blue' },
+    { value: 'all' as const, title: 'Tous', description: 'Voir du contenu de tous les créateurs', color: 'primary' }
+  ]
+
+  const handleRoleContinue = () => {
     if (selectedRole) {
-      onRoleSelect(selectedRole)
+      setStep('gender')
+    }
+  }
+
+  const handleGenderContinue = () => {
+    if (selectedGender) {
+      setStep('feed')
+    }
+  }
+
+  const handleConfirm = () => {
+    if (selectedRole && selectedGender && selectedFeedGender) {
+      onRoleSelect(selectedRole, selectedGender, selectedFeedGender)
     }
   }
 
@@ -71,88 +97,216 @@ export function RoleSelection({ onRoleSelect, isLoading }: RoleSelectionProps) {
               suppressHydrationWarning
             />
           </div>
-          <h1 className="text-3xl md:text-4xl font-bold font-headline">Choisissez votre compte</h1>
+          <h1 className="text-3xl md:text-4xl font-bold font-headline">
+            {step === 'role' && 'Choisissez votre compte'}
+            {step === 'gender' && 'Votre sexe'}
+            {step === 'feed' && 'Contenu préféré'}
+          </h1>
           <p className="mt-2 text-sm md:text-base text-muted-foreground">
-            Une seule étape avant de profiter de NeyshaPlay.
+            {step === 'role' && 'Une seule étape avant de profiter de NeyshaPlay.'}
+            {step === 'gender' && 'Cette information nous aide à personnaliser votre expérience'}
+            {step === 'feed' && 'Quel type de créateurs souhaitez-vous voir en priorité?'}
           </p>
         </div>
 
-        <div className="mt-6 grid gap-4 md:mt-8 md:grid-cols-2">
-          {roles.map((role) => {
-            const Icon = role.icon
-            const isSelected = selectedRole === role.value
+        {/* Step 1: Role Selection */}
+        {step === 'role' && (
+          <>
+            <div className="mt-6 grid gap-4 md:mt-8 md:grid-cols-2">
+              {roles.map((role) => {
+                const Icon = role.icon
+                const isSelected = selectedRole === role.value
 
-            return (
-              <Card
-                key={role.value}
-                role="button"
-                tabIndex={0}
-                aria-pressed={isSelected}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault()
-                    setSelectedRole(role.value)
-                  }
-                }}
-                className={cn(
-                  'group relative cursor-pointer overflow-hidden border border-white/10 bg-white/[0.04] transition-all duration-200 hover:-translate-y-1 hover:border-white/20 hover:bg-white/[0.08] active:scale-[0.99]',
-                  isSelected && 'border-primary/60 bg-primary/10 shadow-[0_0_0_1px] shadow-primary/40'
-                )}
-                onClick={() => setSelectedRole(role.value)}
-              >
-                <div className="absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100 bg-[linear-gradient(120deg,rgba(138,255,0,0.08),transparent_40%)]" />
-                <CardHeader className="relative pb-3">
-                  <div className="flex items-center gap-3">
-                    <div className={cn(
-                      'flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-black/40',
-                      isSelected && 'border-primary/60 bg-primary/20'
-                    )}>
-                      <Icon className={cn('h-6 w-6', isSelected ? 'text-primary' : 'text-foreground')} />
-                    </div>
-                    <div className="flex-1">
-                      <CardTitle className="text-xl md:text-2xl">{role.title}</CardTitle>
-                      <CardDescription className="text-sm md:text-base">
-                        {role.description}
-                      </CardDescription>
-                    </div>
-                    {isSelected && (
-                      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/20 text-primary">
-                        <Check className="h-4 w-4" />
-                      </div>
+                return (
+                  <Card
+                    key={role.value}
+                    role="button"
+                    tabIndex={0}
+                    className={cn(
+                      'group relative cursor-pointer overflow-hidden border border-white/10 bg-white/[0.04] transition-all duration-200 hover:-translate-y-1 hover:border-white/20 hover:bg-white/[0.08] active:scale-[0.99]',
+                      isSelected && 'border-primary/60 bg-primary/10 shadow-[0_0_0_1px] shadow-primary/40'
                     )}
-                  </div>
-                </CardHeader>
-                <CardContent className="relative pt-0">
-                  <ul className="space-y-2 text-sm text-foreground/90">
-                    {role.features.map((feature, index) => (
-                      <li key={index} className="flex items-start gap-2">
-                        <span className={cn(
-                          'mt-2 h-1.5 w-1.5 rounded-full flex-shrink-0',
-                          isSelected ? 'bg-primary' : 'bg-muted-foreground'
-                        )} />
-                        {feature}
-                      </li>
-                    ))}
-                  </ul>
-                </CardContent>
-              </Card>
-            )
-          })}
-        </div>
+                    onClick={() => setSelectedRole(role.value)}
+                  >
+                    <div className="absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100 bg-[linear-gradient(120deg,rgba(138,255,0,0.08),transparent_40%)]" />
+                    <CardHeader className="relative pb-3">
+                      <div className="flex items-center gap-3">
+                        <div className={cn(
+                          'flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-black/40',
+                          isSelected && 'border-primary/60 bg-primary/20'
+                        )}>
+                          <Icon className={cn('h-6 w-6', isSelected ? 'text-primary' : 'text-foreground')} />
+                        </div>
+                        <div className="flex-1">
+                          <CardTitle className="text-xl md:text-2xl">{role.title}</CardTitle>
+                          <CardDescription className="text-sm md:text-base">
+                            {role.description}
+                          </CardDescription>
+                        </div>
+                        {isSelected && (
+                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/20 text-primary">
+                            <Check className="h-4 w-4" />
+                          </div>
+                        )}
+                      </div>
+                    </CardHeader>
+                    <CardContent className="relative pt-0">
+                      <ul className="space-y-2 text-sm text-foreground/90">
+                        {role.features.map((feature, index) => (
+                          <li key={index} className="flex items-start gap-2">
+                            <span className={cn(
+                              'mt-2 h-1.5 w-1.5 rounded-full flex-shrink-0',
+                              isSelected ? 'bg-primary' : 'bg-muted-foreground'
+                            )} />
+                            {feature}
+                          </li>
+                        ))}
+                      </ul>
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </div>
 
-        <div className="mt-8 flex flex-col items-center gap-3">
-          <Button
-            size="lg"
-            onClick={handleConfirm}
-            disabled={!selectedRole || isLoading}
-            className="w-full max-w-md text-lg"
-          >
-            {isLoading ? 'Création du profil...' : 'Continuer'}
-          </Button>
-          <p className="text-xs text-muted-foreground text-center">
-            Vous pourrez modifier ce choix plus tard dans votre profil.
+            <div className="mt-8 flex flex-col items-center gap-3">
+              <Button
+                size="lg"
+                onClick={handleRoleContinue}
+                disabled={!selectedRole}
+                className="w-full max-w-md text-lg"
+              >
+                Continuer
+              </Button>
+            </div>
+          </>
+        )}
+
+        {/* Step 2: Gender Selection */}
+        {step === 'gender' && (
+          <>
+            <div className="mt-6 grid gap-4 md:mt-8 md:grid-cols-2">
+              {genders.map((gender) => {
+                const isSelected = selectedGender === gender.value
+
+                return (
+                  <Card
+                    key={gender.value}
+                    role="button"
+                    className={cn(
+                      'group relative cursor-pointer overflow-hidden border border-white/10 bg-white/[0.04] transition-all duration-200 hover:-translate-y-1 hover:border-white/20 hover:bg-white/[0.08] active:scale-[0.99]',
+                      isSelected && `border-${gender.color}-500/60 bg-${gender.color}-500/10 shadow-[0_0_0_1px] shadow-${gender.color}-500/40`
+                    )}
+                    onClick={() => setSelectedGender(gender.value)}
+                  >
+                    <CardHeader>
+                      <div className="flex items-center gap-3">
+                        <div className={cn(
+                          'flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-black/40',
+                          isSelected && `border-${gender.color}-500/60 bg-${gender.color}-500/20`
+                        )}>
+                          <Users className={cn('h-6 w-6', isSelected ? `text-${gender.color}-500` : 'text-foreground')} />
+                        </div>
+                        <CardTitle className="text-xl md:text-2xl">{gender.title}</CardTitle>
+                        {isSelected && (
+                          <div className={`flex h-7 w-7 items-center justify-center rounded-full bg-${gender.color}-500/20 text-${gender.color}-500 ml-auto`}>
+                            <Check className="h-4 w-4" />
+                          </div>
+                        )}
+                      </div>
+                    </CardHeader>
+                  </Card>
+                )
+              })}
+            </div>
+
+            <div className="mt-8 flex flex-col items-center gap-3">
+              <Button
+                size="lg"
+                onClick={handleGenderContinue}
+                disabled={!selectedGender}
+                className="w-full max-w-md text-lg"
+              >
+                Continuer
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => setStep('role')}
+                className="w-full max-w-md"
+              >
+                Retour
+              </Button>
+            </div>
+          </>
+        )}
+
+        {/* Step 3: Feed Preference */}
+        {step === 'feed' && (
+          <>
+            <div className="mt-6 grid gap-4 md:mt-8">
+              {feedPreferences.map((pref) => {
+                const isSelected = selectedFeedGender === pref.value
+
+                return (
+                  <Card
+                    key={pref.value}
+                    role="button"
+                    className={cn(
+                      'group relative cursor-pointer overflow-hidden border border-white/10 bg-white/[0.04] transition-all duration-200 hover:-translate-y-1 hover:border-white/20 hover:bg-white/[0.08] active:scale-[0.99]',
+                      isSelected && 'border-primary/60 bg-primary/10 shadow-[0_0_0_1px] shadow-primary/40'
+                    )}
+                    onClick={() => setSelectedFeedGender(pref.value)}
+                  >
+                    <CardHeader>
+                      <div className="flex items-center gap-3">
+                        <div className={cn(
+                          'flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-black/40',
+                          isSelected && 'border-primary/60 bg-primary/20'
+                        )}>
+                          <Sparkles className={cn('h-6 w-6', isSelected ? 'text-primary' : 'text-foreground')} />
+                        </div>
+                        <div className="flex-1">
+                          <CardTitle className="text-xl md:text-2xl">{pref.title}</CardTitle>
+                          <CardDescription className="text-sm md:text-base">
+                            {pref.description}
+                          </CardDescription>
+                        </div>
+                        {isSelected && (
+                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/20 text-primary">
+                            <Check className="h-4 w-4" />
+                          </div>
+                        )}
+                      </div>
+                    </CardHeader>
+                  </Card>
+                )
+              })}
+            </div>
+
+            <div className="mt-8 flex flex-col items-center gap-3">
+              <Button
+                size="lg"
+                onClick={handleConfirm}
+                disabled={!selectedFeedGender || isLoading}
+                className="w-full max-w-md text-lg"
+              >
+                {isLoading ? 'Création du profil...' : 'Continuer'}
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => setStep('gender')}
+                className="w-full max-w-md"
+              >
+                Retour
+              </Button>
+            </div>
+          </>
+        )}
+
+        {step !== 'role' && (
+          <p className="mt-4 text-xs text-muted-foreground text-center">
+            Vous pourrez modifier ces choix plus tard dans votre profil.
           </p>
-        </div>
+        )}
       </div>
     </div>
   )
