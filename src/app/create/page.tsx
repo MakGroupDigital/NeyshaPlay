@@ -439,6 +439,16 @@ export default function CreatePage() {
       videoEl.muted = false
       videoEl.volume = 1
       videoEl.playsInline = true
+      videoEl.preload = 'auto'
+
+      // Some mobile browsers update playback events more reliably when the element is in the DOM.
+      videoEl.style.position = 'fixed'
+      videoEl.style.width = '1px'
+      videoEl.style.height = '1px'
+      videoEl.style.opacity = '0'
+      videoEl.style.pointerEvents = 'none'
+      videoEl.style.left = '-9999px'
+      document.body.appendChild(videoEl)
 
       const loadMetadata = () =>
         new Promise<void>((resolve, reject) => {
@@ -499,6 +509,9 @@ export default function CreatePage() {
 
       const chunks: Blob[] = []
       const recorder = new MediaRecorder(destination.stream, { mimeType })
+      let progressIntervalId: number | null = null
+      let stopTimeoutId: number | null = null
+      let shouldStop = false
 
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -520,7 +533,9 @@ export default function CreatePage() {
       setIsExtractingAudio(true)
       setExtractProgress(0)
 
-      const maxExtractSeconds = Math.min(30, Number.isFinite(videoEl.duration) ? videoEl.duration : 30)
+      const rawDuration = Number.isFinite(videoEl.duration) ? videoEl.duration : 0
+      const safeDuration = rawDuration > 0 ? rawDuration : 30
+      const maxExtractSeconds = Math.max(1, Math.min(30, safeDuration))
       setExtractTargetSeconds(maxExtractSeconds)
 
       toast({
@@ -528,33 +543,109 @@ export default function CreatePage() {
         description: 'Progression en temps reel dans le panneau du son.',
       })
 
-      const handleTimeUpdate = () => {
-        if (!maxExtractSeconds) return
-        const progress = Math.min(100, (videoEl.currentTime / maxExtractSeconds) * 100)
-        setExtractProgress(progress)
-        if (videoEl.currentTime >= maxExtractSeconds && recorder.state !== 'inactive') {
+      const extractionStartedAt = performance.now()
+
+      const stopExtraction = () => {
+        if (shouldStop) return
+        shouldStop = true
+        if (recorder.state !== 'inactive') {
           recorder.stop()
-          videoEl.pause()
+        }
+        videoEl.pause()
+      }
+
+      const updateProgress = () => {
+        const elapsedSeconds = (performance.now() - extractionStartedAt) / 1000
+        const playbackSeconds = Number.isFinite(videoEl.currentTime) ? videoEl.currentTime : 0
+        const computedSeconds = Math.max(playbackSeconds, elapsedSeconds)
+        const progress = Math.min(99, Math.max(1, (computedSeconds / maxExtractSeconds) * 100))
+        setExtractProgress(progress)
+        if (computedSeconds >= maxExtractSeconds) {
+          stopExtraction()
         }
       }
 
-      videoEl.addEventListener('timeupdate', handleTimeUpdate)
-      recorder.start()
-      try {
-        await videoEl.play()
-      } catch {
-        // ignore autoplay restrictions
+      videoEl.addEventListener('timeupdate', updateProgress)
+      videoEl.addEventListener('ended', stopExtraction)
+      videoEl.addEventListener('error', stopExtraction)
+
+      const cleanupExtraction = () => {
+        if (progressIntervalId !== null) {
+          window.clearInterval(progressIntervalId)
+        }
+        if (stopTimeoutId !== null) {
+          window.clearTimeout(stopTimeoutId)
+        }
+        videoEl.removeEventListener('timeupdate', updateProgress)
+        videoEl.removeEventListener('ended', stopExtraction)
+        videoEl.removeEventListener('error', stopExtraction)
+        videoEl.pause()
+        videoEl.removeAttribute('src')
+        videoEl.load()
+        source.disconnect()
+        silentGain.disconnect()
+        destination.disconnect()
+        if (videoEl.parentElement) {
+          videoEl.parentElement.removeChild(videoEl)
+        }
+        URL.revokeObjectURL(videoUrl)
       }
 
-      videoEl.onended = () => {
-        if (recorder.state !== 'inactive') recorder.stop()
+      try {
+        recorder.start(200)
+      } catch (error) {
+        cleanupExtraction()
+        setIsExtractingAudio(false)
+        setExtractProgress(0)
+        toast({
+          title: 'Extraction échouée',
+          description: "Impossible de démarrer l'extraction audio.",
+          variant: 'destructive',
+        })
+        return
       }
+
+      progressIntervalId = window.setInterval(updateProgress, 120)
+      updateProgress()
+
+      let playbackStarted = false
+      try {
+        await videoEl.play()
+        playbackStarted = true
+      } catch {
+        videoEl.muted = true
+        try {
+          await videoEl.play()
+          playbackStarted = true
+        } catch {
+          playbackStarted = false
+        }
+      }
+
+      if (!playbackStarted) {
+        stopExtraction()
+        // Ensure recorder promise rejections are swallowed in this early-exit path.
+        void audioBlobPromise.catch(() => undefined)
+        cleanupExtraction()
+        setIsExtractingAudio(false)
+        setExtractProgress(0)
+        toast({
+          title: 'Extraction échouée',
+          description: "La lecture de la vidéo a été bloquée sur cet appareil.",
+          variant: 'destructive',
+        })
+        return
+      }
+
+      stopTimeoutId = window.setTimeout(() => {
+        stopExtraction()
+      }, Math.ceil((maxExtractSeconds + 2) * 1000))
 
       let audioBlob: Blob
       try {
         audioBlob = await audioBlobPromise
       } catch (error) {
-        URL.revokeObjectURL(videoUrl)
+        cleanupExtraction()
         setIsExtractingAudio(false)
         setExtractProgress(0)
         toast({
@@ -565,9 +656,7 @@ export default function CreatePage() {
         return
       }
 
-      URL.revokeObjectURL(videoUrl)
-      videoEl.removeEventListener('timeupdate', handleTimeUpdate)
-      source.disconnect()
+      cleanupExtraction()
       setIsExtractingAudio(false)
       setExtractProgress(100)
 
