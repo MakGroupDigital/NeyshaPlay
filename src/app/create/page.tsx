@@ -114,6 +114,9 @@ export default function CreatePage() {
   const [soundDuration, setSoundDuration] = useState(0)
   const [soundTrimStart, setSoundTrimStart] = useState(0)
   const [soundTrimLength, setSoundTrimLength] = useState(10)
+  const [isExtractingAudio, setIsExtractingAudio] = useState(false)
+  const [extractProgress, setExtractProgress] = useState(0)
+  const [extractTargetSeconds, setExtractTargetSeconds] = useState(0)
   const [currentFilterIndex, setCurrentFilterIndex] = useState(0)
   const [recordedFilter, setRecordedFilter] = useState('none')
   const [currentSpeedIndex, setCurrentSpeedIndex] = useState(0)
@@ -514,11 +517,28 @@ export default function CreatePage() {
         recorder.onerror = () => reject(new Error('Recorder error'))
       })
 
+      setIsExtractingAudio(true)
+      setExtractProgress(0)
+
+      const maxExtractSeconds = Math.min(30, Number.isFinite(videoEl.duration) ? videoEl.duration : 30)
+      setExtractTargetSeconds(maxExtractSeconds)
+
       toast({
         title: 'Extraction en cours',
-        description: 'Merci de patienter...',
+        description: 'Progression en temps reel dans le panneau du son.',
       })
 
+      const handleTimeUpdate = () => {
+        if (!maxExtractSeconds) return
+        const progress = Math.min(100, (videoEl.currentTime / maxExtractSeconds) * 100)
+        setExtractProgress(progress)
+        if (videoEl.currentTime >= maxExtractSeconds && recorder.state !== 'inactive') {
+          recorder.stop()
+          videoEl.pause()
+        }
+      }
+
+      videoEl.addEventListener('timeupdate', handleTimeUpdate)
       recorder.start()
       try {
         await videoEl.play()
@@ -535,6 +555,8 @@ export default function CreatePage() {
         audioBlob = await audioBlobPromise
       } catch (error) {
         URL.revokeObjectURL(videoUrl)
+        setIsExtractingAudio(false)
+        setExtractProgress(0)
         toast({
           title: 'Extraction échouée',
           description: 'Impossible de récupérer le son de cette vidéo.',
@@ -544,7 +566,10 @@ export default function CreatePage() {
       }
 
       URL.revokeObjectURL(videoUrl)
+      videoEl.removeEventListener('timeupdate', handleTimeUpdate)
       source.disconnect()
+      setIsExtractingAudio(false)
+      setExtractProgress(100)
 
       if (selectedSoundSource === 'device' && selectedSoundUrl?.startsWith('blob:')) {
         URL.revokeObjectURL(selectedSoundUrl)
@@ -1221,6 +1246,10 @@ export default function CreatePage() {
                   accept="audio/*,video/*"
                   className="hidden"
                   onChange={(event) => {
+                    if (isExtractingAudio) {
+                      event.currentTarget.value = ''
+                      return
+                    }
                     const file = event.target.files?.[0]
                     if (file) {
                       if (file.type.startsWith('video/')) {
@@ -1232,12 +1261,35 @@ export default function CreatePage() {
                     event.currentTarget.value = ''
                   }}
                 />
-                <Button onClick={() => fileInputRef.current?.click()} variant="secondary">
-                  Choisir un fichier audio ou vidéo
+                <Button
+                  onClick={() => fileInputRef.current?.click()}
+                  variant="secondary"
+                  disabled={isExtractingAudio}
+                >
+                  {isExtractingAudio ? 'Extraction en cours...' : 'Choisir un fichier audio ou vidéo'}
                 </Button>
                 <p className="text-xs text-muted-foreground">
                   Les vidéos seront importées et le son sera extrait automatiquement.
                 </p>
+                {isExtractingAudio && (
+                  <div className="rounded-xl border border-primary/30 bg-primary/10 p-3 space-y-2">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>Extraction du son</span>
+                      <span>{Math.round(extractProgress)}%</span>
+                    </div>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+                      <div
+                        className="h-full bg-primary transition-[width] duration-150"
+                        style={{ width: `${extractProgress}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {extractTargetSeconds > 0
+                        ? `Extraction rapide des ${Math.round(extractTargetSeconds)} premieres secondes.`
+                        : 'Extraction en cours...'}
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-2">
