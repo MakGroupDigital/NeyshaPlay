@@ -14,6 +14,8 @@ export type User = {
   role: UserRole
   email: string
   createdAt: Timestamp
+  gender?: 'female' | 'male'
+  feedGender?: 'female' | 'male' | 'all'
 }
 
 export type Wallet = {
@@ -59,6 +61,7 @@ export type Video = {
   price?: number
   currency?: 'USD' | 'CDF' | string
   cloudinaryPublicId?: string
+  creatorGender?: 'female' | 'male'
 }
 
 export type Notification = {

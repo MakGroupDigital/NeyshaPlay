@@ -5,6 +5,7 @@ import { SplashScreen } from '@/components/splash-screen';
 import { AgeGate } from '@/components/age-gate';
 import { AppLayout } from './layout/app-layout';
 import { FirebaseClientProvider } from '@/firebase/client-provider';
+import { GenderGate } from '@/components/gender-gate';
 
 const MIN_SPLASH_TIME = 2000; // 2 seconds
 
@@ -71,7 +72,9 @@ export function AppGate({ children }: { children: React.ReactNode }) {
 
   return (
     <FirebaseClientProvider>
-      <AppLayout>{children}</AppLayout>
+      <GenderGate>
+        <AppLayout>{children}</AppLayout>
+      </GenderGate>
     </FirebaseClientProvider>
   );
 }

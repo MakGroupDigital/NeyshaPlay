@@ -7,15 +7,20 @@
     "genkit:dev": "genkit start -- tsx src/ai/dev.ts",
     "genkit:watch": "genkit start -- tsx --watch src/ai/dev.ts",
     "build": "NODE_ENV=production next build",
+    "build:mobile": "node scripts/build-mobile.js",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "setup:cloudinary": "node scripts/setup-cloudinary.js"
+    "setup:cloudinary": "node scripts/setup-cloudinary.js",
+    "cap:sync": "npx cap sync",
+    "cap:open:android": "npx cap open android",
+    "cap:run:android": "npx cap run android"
   },
   "dependencies": {
     "@capacitor/android": "^8.2.0",
     "@capacitor/cli": "^8.2.0",
     "@capacitor/core": "^8.2.0",
+    "@capacitor/splash-screen": "^8.0.1",
     "@genkit-ai/google-genai": "^1.20.0",
     "@genkit-ai/next": "^1.20.0",
     "@hookform/resolvers": "^4.1.3",

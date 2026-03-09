@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -13,10 +13,11 @@ import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
-import { useUser } from '@/firebase'
+import { useDoc, useUser } from '@/firebase'
 import { useFirestore } from '@/firebase/provider'
 import { addDoc, collection, doc, serverTimestamp } from 'firebase/firestore'
 import { uploadVideoToCloudinary, getVideoThumbnail } from '@/lib/cloudinary'
+import type { User } from '@/lib/types'
 
 const MAX_RECORDING_SECONDS = 15
 
@@ -50,6 +51,12 @@ export default function CreatePage() {
   const recordedChunksRef = useRef<Blob[]>([])
   const { user, loading: userLoading } = useUser()
   const firestore = useFirestore()
+
+  const userProfileRef = useMemo(() => {
+    if (!firestore || !user) return null
+    return doc(firestore, 'users', user.uid)
+  }, [firestore, user])
+  const { data: profile } = useDoc<User>(userProfileRef)
 
   const [hasCameraPermission, setHasCameraPermission] = useState(true)
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([])
@@ -262,6 +269,15 @@ export default function CreatePage() {
         })
         return
     }
+    if (!profile?.gender) {
+        toast({
+            title: 'Sexe requis',
+            description: 'Veuillez définir votre sexe dans les paramètres avant de publier.',
+            variant: 'destructive',
+        })
+        router.push('/settings')
+        return
+    }
 
     const parsedPrice = Number(price.replace(',', '.'))
     if (isPaidContent && (!Number.isFinite(parsedPrice) || parsedPrice <= 0)) {
@@ -313,6 +329,7 @@ export default function CreatePage() {
         isPaid: isPaidContent,
         price: isPaidContent ? parsedPrice : 0,
         currency: isPaidContent ? currency : 'USD',
+        creatorGender: profile.gender,
       }
 
       await addDoc(collection(firestore, 'videos'), newVideo)
@@ -414,6 +431,14 @@ export default function CreatePage() {
         </div>
 
         <div className="w-full max-w-sm space-y-4">
+          {!profile?.gender && (
+            <Alert variant="destructive">
+              <AlertTitle>Sexe obligatoire</AlertTitle>
+              <AlertDescription>
+                Définissez votre sexe dans les paramètres pour pouvoir publier.
+              </AlertDescription>
+            </Alert>
+          )}
           <Textarea
             placeholder="Écrivez une légende et ajoutez des #hashtags..."
             className="h-32 text-base"

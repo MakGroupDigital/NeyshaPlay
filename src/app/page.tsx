@@ -4,10 +4,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   collection,
+  doc,
   query,
   getDocs,
   getDoc,
   setDoc,
+  updateDoc,
+  increment,
   orderBy,
   limit,
   startAfter,
@@ -18,11 +21,12 @@ import {
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { useFirestore } from '@/firebase/provider';
-import { useUser } from '@/firebase';
+import { useDoc, useUser } from '@/firebase';
 import { VideoCard } from '@/components/video-card';
 import { type Video, type User } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
+import { cn } from '@/lib/utils';
 
 const DEFAULT_PAGE_SIZE = 6;
 
@@ -79,8 +83,17 @@ export default function Home() {
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [unlockedMap, setUnlockedMap] = useState<Record<string, boolean>>({});
+  const [feedGender, setFeedGender] = useState<'female' | 'male' | 'all' | null>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const userCache = useRef<Map<string, User>>(new Map());
+  const migratedRef = useRef<Set<string>>(new Set());
+
+  const userDocRef = useMemo(() => {
+    if (!firestore || !authUser) return null;
+    return doc(firestore, 'users', authUser.uid);
+  }, [firestore, authUser]);
+
+  const { data: profile } = useDoc<User>(userDocRef);
 
   useEffect(() => {
     const updatePageSize = () => setPageSize(resolvePageSize());
@@ -92,6 +105,31 @@ export default function Home() {
       return () => connection.removeEventListener('change', updatePageSize);
     }
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = localStorage.getItem('feedGender');
+      if (stored === 'female' || stored === 'male' || stored === 'all') {
+        setFeedGender(stored);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    if (feedGender) return;
+    const next = profile?.feedGender || profile?.gender;
+    if (next === 'female' || next === 'male' || next === 'all') {
+      setFeedGender(next);
+      try {
+        localStorage.setItem('feedGender', next);
+      } catch {
+        // ignore
+      }
+    }
+  }, [feedGender, profile?.feedGender, profile?.gender]);
 
   const fallbackUser = useMemo(
     () =>
@@ -134,6 +172,30 @@ export default function Home() {
     [fallbackUser]
   );
 
+  const persistFeedGender = useCallback(
+    async (value: 'female' | 'male' | 'all') => {
+      setFeedGender(value);
+      try {
+        localStorage.setItem('feedGender', value);
+      } catch {
+        // ignore
+      }
+
+      if (firestore && authUser) {
+        try {
+          await setDoc(
+            doc(firestore, 'users', authUser.uid),
+            { feedGender: value },
+            { merge: true }
+          );
+        } catch (error) {
+          console.warn('Unable to save feed gender preference:', error);
+        }
+      }
+    },
+    [authUser, firestore]
+  );
+
   const buildVideos = useCallback(
     async (docs: QueryDocumentSnapshot<DocumentData>[]) => {
       const results = await Promise.all(
@@ -147,6 +209,7 @@ export default function Home() {
             id: videoDoc.id,
             ...videoData,
             user,
+            creatorGender: videoData.creatorGender ?? user.gender,
           } as Video;
         })
       );
@@ -161,6 +224,7 @@ export default function Home() {
     setLoading(true);
     setHasMore(true);
     setLastDoc(null);
+    setVideos([]);
 
     try {
       const videosQuery = query(
@@ -170,7 +234,13 @@ export default function Home() {
       );
       const querySnapshot = await getDocs(videosQuery);
       const newVideos = await buildVideos(querySnapshot.docs);
-      setVideos(newVideos);
+      const shouldFilter = feedGender === 'female' || feedGender === 'male';
+      const filteredVideos = shouldFilter
+        ? newVideos.filter(
+            (video) => (video.creatorGender ?? video.user.gender) === feedGender
+          )
+        : newVideos;
+      setVideos(filteredVideos);
       setUnlockedMap({});
       setLastDoc(querySnapshot.docs[querySnapshot.docs.length - 1] ?? null);
       setHasMore(querySnapshot.docs.length === pageSize);
@@ -179,7 +249,7 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, [firestore, pageSize, buildVideos]);
+  }, [firestore, pageSize, buildVideos, feedGender]);
 
   const loadMore = useCallback(async () => {
     if (!firestore || loadingMore || !hasMore || !lastDoc) return;
@@ -194,7 +264,13 @@ export default function Home() {
       );
       const querySnapshot = await getDocs(videosQuery);
       const newVideos = await buildVideos(querySnapshot.docs);
-      setVideos((prev) => [...prev, ...newVideos]);
+      const shouldFilter = feedGender === 'female' || feedGender === 'male';
+      const filteredVideos = shouldFilter
+        ? newVideos.filter(
+            (video) => (video.creatorGender ?? video.user.gender) === feedGender
+          )
+        : newVideos;
+      setVideos((prev) => [...prev, ...filteredVideos]);
       setLastDoc(querySnapshot.docs[querySnapshot.docs.length - 1] ?? lastDoc);
       setHasMore(querySnapshot.docs.length === pageSize);
     } catch (error) {
@@ -202,7 +278,7 @@ export default function Home() {
     } finally {
       setLoadingMore(false);
     }
-  }, [firestore, loadingMore, hasMore, lastDoc, pageSize, buildVideos]);
+  }, [firestore, loadingMore, hasMore, lastDoc, pageSize, buildVideos, feedGender]);
 
   useEffect(() => {
     if (!firestore) return;
@@ -258,6 +334,26 @@ export default function Home() {
       cancelled = true;
     };
   }, [firestore, authUser, videos]);
+
+  useEffect(() => {
+    if (!firestore || videos.length === 0) return;
+    const candidates = videos.filter(
+      (video) => !video.creatorGender && video.user?.gender
+    );
+    if (candidates.length === 0) return;
+
+    candidates.forEach(async (video) => {
+      if (migratedRef.current.has(video.id)) return;
+      migratedRef.current.add(video.id);
+      try {
+        await updateDoc(doc(firestore, 'videos', video.id), {
+          creatorGender: video.user.gender,
+        });
+      } catch (error) {
+        console.warn('Migration creatorGender failed:', error);
+      }
+    });
+  }, [firestore, videos]);
 
   const handlePay = useCallback(
     async (video: Video, method: 'mobile-money' | 'card' | 'wallet') => {
@@ -338,42 +434,78 @@ export default function Home() {
     return () => observer.disconnect();
   }, [hasMore, loading, loadingMore, loadMore]);
 
+  const genderTabs = (
+    <div className="pointer-events-none fixed top-[calc(4rem+env(safe-area-inset-top))] left-0 right-0 z-30">
+      <div className="pointer-events-auto mx-auto flex w-full justify-center px-4 md:max-w-[640px]">
+        <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/60 p-1 shadow-lg shadow-black/40 backdrop-blur-md">
+          {(
+            [
+              { value: 'all' as const, label: 'Tous' },
+              { value: 'female' as const, label: 'Femme' },
+              { value: 'male' as const, label: 'Homme' },
+            ] as const
+          ).map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              onClick={() => persistFeedGender(item.value)}
+              className={cn(
+                'rounded-full px-4 py-1.5 text-sm font-semibold transition-colors',
+                feedGender === item.value || (!feedGender && item.value === 'all')
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-white/80 hover:bg-white/10 hover:text-white'
+              )}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
   if (loading) {
     return (
-      <div className="w-full md:mx-auto md:max-w-[640px]">
-        {Array.from({ length: 2 }).map((_, index) => (
-          <VideoCardSkeleton key={`skeleton-${index}`} />
-        ))}
+      <div className="w-full">
+        {genderTabs}
+        <div className="w-full md:mx-auto md:max-w-[640px]">
+          {Array.from({ length: 2 }).map((_, index) => (
+            <VideoCardSkeleton key={`skeleton-${index}`} />
+          ))}
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="w-full md:mx-auto md:max-w-[640px]">
-      {videos.map((video) => {
-        const ownerId = (video.userRef as any)?.id ?? video.user?.id;
-        const isOwner = authUser && ownerId === authUser.uid;
-        const isLocked =
-          Boolean((video.isPaid ?? false) || Number(video.price || 0) > 0) &&
-          !isOwner &&
-          !unlockedMap[video.id];
+    <div className="w-full">
+      {genderTabs}
+      <div className="w-full md:mx-auto md:max-w-[640px]">
+        {videos.map((video) => {
+          const ownerId = (video.userRef as any)?.id ?? video.user?.id;
+          const isOwner = authUser && ownerId === authUser.uid;
+          const isLocked =
+            Boolean((video.isPaid ?? false) || Number(video.price || 0) > 0) &&
+            !isOwner &&
+            !unlockedMap[video.id];
 
-        return (
-          <VideoCard
-            key={video.id}
-            video={video}
-            isLocked={isLocked}
-            onPay={handlePay}
-          />
-        );
-      })}
-      {loadingMore && <VideoCardSkeleton />}
-      {hasMore && <div ref={loadMoreRef} className="h-10" />}
-      {!hasMore && videos.length === 0 && (
-        <div className="flex min-h-[60dvh] items-center justify-center text-muted-foreground">
-          Aucun contenu disponible pour le moment.
-        </div>
-      )}
+          return (
+            <VideoCard
+              key={video.id}
+              video={video}
+              isLocked={isLocked}
+              onPay={handlePay}
+            />
+          );
+        })}
+        {loadingMore && <VideoCardSkeleton />}
+        {hasMore && <div ref={loadMoreRef} className="h-10" />}
+        {!hasMore && videos.length === 0 && (
+          <div className="flex min-h-[60dvh] items-center justify-center text-muted-foreground">
+            Aucun contenu disponible pour le moment.
+          </div>
+        )}
+      </div>
     </div>
   );
 }

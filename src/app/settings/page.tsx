@@ -7,6 +7,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore'
 import { useAuth, useFirestore, useUser } from '@/firebase'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -204,6 +205,14 @@ export default function SettingsPage() {
 
   const handleSave = async () => {
     if (!firestore || !authUser || !profile) return
+    if (!profile.gender) {
+      toast({
+        title: 'Sexe requis',
+        description: 'Veuillez sélectionner votre sexe pour enregistrer vos paramètres.',
+        variant: 'destructive',
+      })
+      return
+    }
     setIsSaving(true)
     try {
       await setDoc(
@@ -212,6 +221,7 @@ export default function SettingsPage() {
           name: profile.name,
           username: profile.username,
           bio: profile.bio,
+          gender: profile.gender,
           settings,
         },
         { merge: true }
@@ -271,6 +281,7 @@ export default function SettingsPage() {
   }
 
   const isCreator = profile.role === 'creator'
+  const isGenderMissing = !profile.gender
 
   return (
     <div className="w-full max-w-3xl mx-auto px-4 pt-[calc(1.5rem+env(safe-area-inset-top))] pb-[calc(6rem+env(safe-area-inset-bottom))] space-y-6">
@@ -283,6 +294,15 @@ export default function SettingsPage() {
           <p className="text-sm text-muted-foreground">Gérez votre compte et vos préférences</p>
         </div>
       </div>
+
+      {isGenderMissing && (
+        <Alert variant="destructive" className="border-destructive/40 bg-destructive/10 text-foreground">
+          <AlertTitle>Sexe obligatoire</AlertTitle>
+          <AlertDescription>
+            Veuillez définir votre sexe dans votre profil pour continuer à utiliser pleinement l’application.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <Card className="border-white/10 bg-card">
         <CardHeader className="pb-3">
@@ -305,6 +325,22 @@ export default function SettingsPage() {
               value={profile.username}
               onChange={(e) => setProfile((prev) => prev && { ...prev, username: e.target.value })}
             />
+          </div>
+          <div className="grid gap-2">
+            <Label>Sexe (obligatoire)</Label>
+            <select
+              className="h-11 rounded-md border border-input bg-background px-3 text-sm"
+              value={profile.gender ?? ''}
+              onChange={(e) =>
+                setProfile((prev) =>
+                  prev && { ...prev, gender: e.target.value as 'female' | 'male' }
+                )
+              }
+            >
+              <option value="">Sélectionner</option>
+              <option value="female">Femme</option>
+              <option value="male">Homme</option>
+            </select>
           </div>
           <div className="grid gap-2">
             <Label>Bio</Label>

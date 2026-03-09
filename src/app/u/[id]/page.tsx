@@ -16,6 +16,9 @@ export default function PublicProfilePage() {
   const params = useParams()
   const firestore = useFirestore()
   const userId = Array.isArray(params.id) ? params.id[0] : params.id
+  const normalizedId = typeof userId === 'string'
+    ? decodeURIComponent(userId).replace(/^@/, '').trim()
+    : userId
 
   const [userData, setUserData] = useState<User | null>(null)
   const [userVideos, setUserVideos] = useState<Video[]>([])
@@ -34,24 +37,49 @@ export default function PublicProfilePage() {
       setLoading(true)
 
       try {
-        const userDocRef = doc(firestore, 'users', userId)
-        const userDoc = await getDoc(userDocRef)
-        if (userDoc.exists()) {
+        let userDocRef = normalizedId ? doc(firestore, 'users', normalizedId) : null
+        let userDoc = userDocRef ? await getDoc(userDocRef) : null
+
+        if (!userDoc || !userDoc.exists()) {
+          const candidates = [normalizedId, normalizedId ? `@${normalizedId}` : ''].filter(Boolean)
+          let foundDoc: typeof userDoc | null = null
+          for (const candidate of candidates) {
+            const q = query(
+              collection(firestore, 'users'),
+              where('username', '==', candidate)
+            )
+            const snap = await getDocs(q)
+            if (!snap.empty) {
+              foundDoc = snap.docs[0]
+              break
+            }
+          }
+          if (foundDoc) {
+            userDoc = foundDoc
+            userDocRef = foundDoc.ref
+          }
+        }
+
+        if (userDoc && userDoc.exists()) {
           setUserData({ id: userDoc.id, ...userDoc.data() } as User)
         } else {
           setUserData(null)
         }
 
-        const videosQuery = query(
-          collection(firestore, 'videos'),
-          where('userRef', '==', userDocRef)
-        )
-        const videosSnapshot = await getDocs(videosQuery)
-        const videos = videosSnapshot.docs.map((docSnap) => ({
-          id: docSnap.id,
-          ...docSnap.data(),
-        })) as Video[]
-        setUserVideos(videos)
+        if (userDocRef) {
+          const videosQuery = query(
+            collection(firestore, 'videos'),
+            where('userRef', '==', userDocRef)
+          )
+          const videosSnapshot = await getDocs(videosQuery)
+          const videos = videosSnapshot.docs.map((docSnap) => ({
+            id: docSnap.id,
+            ...docSnap.data(),
+          })) as Video[]
+          setUserVideos(videos)
+        } else {
+          setUserVideos([])
+        }
       } catch (error) {
         console.error('Error loading public profile:', error)
       } finally {
@@ -60,7 +88,7 @@ export default function PublicProfilePage() {
     }
 
     fetchData()
-  }, [firestore, userId])
+  }, [firestore, normalizedId])
 
   if (loading) {
     return (
