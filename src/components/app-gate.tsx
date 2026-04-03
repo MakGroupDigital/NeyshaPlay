@@ -7,6 +7,8 @@ import { AppLayout } from './layout/app-layout';
 import { FirebaseClientProvider } from '@/firebase/client-provider';
 import { GenderGate } from '@/components/gender-gate';
 import { AuthBootstrap } from '@/components/auth-bootstrap';
+import { useUser } from '@/firebase';
+import { usePathname, useRouter } from 'next/navigation';
 
 const MIN_SPLASH_TIME = 2000; // 2 seconds
 
@@ -74,9 +76,26 @@ export function AppGate({ children }: { children: React.ReactNode }) {
   return (
     <FirebaseClientProvider>
       <AuthBootstrap />
+      <HomeRedirect />
       <GenderGate>
         <AppLayout>{children}</AppLayout>
       </GenderGate>
     </FirebaseClientProvider>
   );
+}
+
+function HomeRedirect() {
+  const { user, loading } = useUser()
+  const pathname = usePathname()
+  const router = useRouter()
+
+  useEffect(() => {
+    if (loading) return
+    if (!user) return
+    if (pathname && pathname !== '/' && pathname.startsWith('/login')) {
+      router.replace('/')
+    }
+  }, [user, loading, pathname, router])
+
+  return null
 }
