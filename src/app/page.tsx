@@ -279,10 +279,11 @@ export default function Home() {
     setVideos([]);
 
     try {
+      const fetchLimit = pageSize * 3;
       const videosQuery = query(
         collection(firestore, 'videos'),
         orderBy('createdAt', 'desc'),
-        limit(pageSize)
+        limit(fetchLimit)
       );
       const querySnapshot = await getDocs(videosQuery);
       const newVideos = await buildVideos(querySnapshot.docs);
@@ -292,10 +293,10 @@ export default function Home() {
             (video) => (video.creatorGender ?? video.user.gender) === feedGender
           )
         : newVideos;
-      setVideos(filteredVideos);
+      setVideos(filteredVideos.slice(0, pageSize));
       setUnlockedMap({});
       setLastDoc(querySnapshot.docs[querySnapshot.docs.length - 1] ?? null);
-      setHasMore(querySnapshot.docs.length === pageSize);
+      setHasMore(querySnapshot.docs.length === fetchLimit);
     } catch (error) {
       console.error('Error fetching videos:', error);
     } finally {
@@ -308,11 +309,12 @@ export default function Home() {
     setLoadingMore(true);
 
     try {
+      const fetchLimit = pageSize * 3;
       const videosQuery = query(
         collection(firestore, 'videos'),
         orderBy('createdAt', 'desc'),
         startAfter(lastDoc),
-        limit(pageSize)
+        limit(fetchLimit)
       );
       const querySnapshot = await getDocs(videosQuery);
       const newVideos = await buildVideos(querySnapshot.docs);
@@ -322,9 +324,9 @@ export default function Home() {
             (video) => (video.creatorGender ?? video.user.gender) === feedGender
           )
         : newVideos;
-      setVideos((prev) => [...prev, ...filteredVideos]);
+      setVideos((prev) => [...prev, ...filteredVideos.slice(0, pageSize)]);
       setLastDoc(querySnapshot.docs[querySnapshot.docs.length - 1] ?? lastDoc);
-      setHasMore(querySnapshot.docs.length === pageSize);
+      setHasMore(querySnapshot.docs.length === fetchLimit);
     } catch (error) {
       console.error('Error fetching more videos:', error);
     } finally {

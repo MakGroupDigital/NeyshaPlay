@@ -622,11 +622,11 @@ export function VideoCard({ video, isLocked = false, onPay, globalMuted = true, 
               />
               <Button 
                 size="icon" 
-                className="rounded-full h-10 w-10"
+                className="rounded-full h-12 w-12"
                 onClick={handleSendComment}
                 disabled={!commentText.trim()}
               >
-                <Send className="h-4 w-4" />
+                <Send className="h-5 w-5" />
               </Button>
             </div>
           </div>
