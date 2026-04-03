@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { Checkbox } from '@/components/ui/checkbox'
 
 export default function ProfilePage() {
   const { user, loading: userLoading } = useUser()
@@ -52,6 +53,8 @@ export default function ProfilePage() {
   const [deleteConfirmVideo, setDeleteConfirmVideo] = useState<Video | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [showCreatorDialog, setShowCreatorDialog] = useState(false)
+  const [acceptPolicy, setAcceptPolicy] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
 
   useEffect(() => {
@@ -177,6 +180,26 @@ export default function ProfilePage() {
       })
     } finally {
       setIsDeleting(false)
+    }
+  }
+
+  const handleBecomeCreator = async () => {
+    if (!firestore || !user || !acceptPolicy) return
+    try {
+      const userRef = doc(firestore, 'users', user.uid)
+      await updateDoc(userRef, { role: 'creator', updatedAt: new Date() })
+      setUserData((prev) => (prev ? { ...prev, role: 'creator' } : prev))
+      toast({
+        title: 'Bienvenue parmi les créateurs',
+        description: 'Votre compte est maintenant configuré pour publier des vidéos.',
+      })
+      setShowCreatorDialog(false)
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        title: 'Erreur',
+        description: 'Impossible de mettre à jour le rôle. Réessayez.',
+      })
     }
   }
 
@@ -394,9 +417,20 @@ export default function ProfilePage() {
               </Card>
             ))}
           </div>
-          {userVideos.length === 0 && (
+          {userVideos.length === 0 && userData?.role === 'creator' && (
             <div className="py-10 text-center text-muted-foreground">
               Aucune vidéo publiée pour le moment.
+            </div>
+          )}
+          {userVideos.length === 0 && userData?.role === 'user' && (
+            <div className="py-8 space-y-4 text-center">
+              <p className="text-lg font-semibold">Compte utilisateur</p>
+              <p className="text-sm text-muted-foreground">
+                Vous regardez du contenu en tant qu’utilisateur. Vous pouvez devenir créateur·trice et publier vos vidéos.
+              </p>
+              <Button onClick={() => { setShowCreatorDialog(true); setAcceptPolicy(false); }}>
+                Devenir créateur·trice
+              </Button>
             </div>
           )}
         </div>
@@ -526,6 +560,40 @@ export default function ProfilePage() {
             </Button>
             <Button variant="destructive" onClick={handleDeleteVideo} disabled={isDeleting}>
               {isDeleting ? 'Suppression...' : 'Supprimer'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog devenir créateur */}
+      <Dialog open={showCreatorDialog} onOpenChange={(open) => { setShowCreatorDialog(open); if (!open) setAcceptPolicy(false); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Devenir créateur·trice</DialogTitle>
+            <DialogDescription>
+              Publiez vos vidéos, gagnez en visibilité et monétisez votre audience. Merci de lire et d’accepter notre politique des créateurs.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2 text-sm text-muted-foreground">
+            <p>En devenant créateur·trice, vous acceptez de :</p>
+            <ul className="list-disc pl-5 space-y-1 text-left">
+              <li>Respecter les règles de contenu (pas de contenu illicite, violent ou haineux).</li>
+              <li>Détenir les droits sur les médias publiés.</li>
+              <li>Accepter que les gains soient soumis à vérification et aux conditions locales.</li>
+            </ul>
+            <div className="flex items-start gap-2 pt-2">
+              <Checkbox id="accept-policy" checked={acceptPolicy} onCheckedChange={(v) => setAcceptPolicy(Boolean(v))} />
+              <label htmlFor="accept-policy" className="text-sm leading-tight text-foreground">
+                J’ai lu et j’accepte la politique des créateurs.
+              </label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setShowCreatorDialog(false); setAcceptPolicy(false); }}>
+              Annuler
+            </Button>
+            <Button onClick={handleBecomeCreator} disabled={!acceptPolicy}>
+              Valider et devenir créateur·trice
             </Button>
           </DialogFooter>
         </DialogContent>
