@@ -1,14 +1,18 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { collection, doc, getDoc, getDocs, limit, query, where } from 'firebase/firestore'
 import { Wallet as WalletIcon, ArrowDownToLine, ArrowUpRight, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { useFirestore, useUser } from '@/firebase'
 import { ClientFormattedNumber } from '@/components/client-formatted-number'
 import type { Transaction, Wallet } from '@/lib/types'
+import { useToast } from '@/hooks/use-toast'
 
 type WalletState = {
   wallet: Wallet | null
@@ -24,8 +28,13 @@ export default function WalletPage() {
   const { user, loading: userLoading } = useUser()
   const firestore = useFirestore()
   const router = useRouter()
+  const { toast } = useToast()
   const [loading, setLoading] = useState(true)
   const [{ wallet, transactions }, setWalletState] = useState<WalletState>(emptyState)
+  const [showWithdrawDialog, setShowWithdrawDialog] = useState(false)
+  const [withdrawAmount, setWithdrawAmount] = useState('')
+  const [withdrawPhone, setWithdrawPhone] = useState('')
+  const [isWithdrawing, setIsWithdrawing] = useState(false)
 
   useEffect(() => {
     if (!userLoading && !user) {
@@ -33,52 +42,155 @@ export default function WalletPage() {
     }
   }, [user, userLoading, router])
 
-  useEffect(() => {
-    const fetchWallet = async () => {
-      if (!firestore || !user) return
-      setLoading(true)
+  const fetchWallet = useCallback(async () => {
+    if (!firestore || !user) return
+    setLoading(true)
 
-      try {
-        const directRef = doc(firestore, 'wallets', user.uid)
-        const directSnap = await getDoc(directRef)
+    try {
+      const directRef = doc(firestore, 'wallets', user.uid)
+      const directSnap = await getDoc(directRef)
 
-        if (directSnap.exists()) {
-          const data = { id: directSnap.id, ...directSnap.data() } as Wallet
-          setWalletState({
-            wallet: data,
-            transactions: Array.isArray(data.transactions) ? data.transactions : [],
-          })
-          setLoading(false)
-          return
-        }
-
-        const walletsQuery = query(
-          collection(firestore, 'wallets'),
-          where('userId', '==', user.uid),
-          limit(1)
-        )
-        const walletsSnapshot = await getDocs(walletsQuery)
-
-        if (!walletsSnapshot.empty) {
-          const docSnap = walletsSnapshot.docs[0]
-          const data = { id: docSnap.id, ...docSnap.data() } as Wallet
-          setWalletState({
-            wallet: data,
-            transactions: Array.isArray(data.transactions) ? data.transactions : [],
-          })
-        } else {
-          setWalletState(emptyState)
-        }
-      } catch (error) {
-        console.error('Error loading wallet:', error)
-        setWalletState(emptyState)
-      } finally {
+      if (directSnap.exists()) {
+        const data = { id: directSnap.id, ...directSnap.data() } as Wallet
+        setWalletState({
+          wallet: data,
+          transactions: Array.isArray(data.transactions) ? data.transactions : [],
+        })
         setLoading(false)
+        return
       }
+
+      const walletsQuery = query(
+        collection(firestore, 'wallets'),
+        where('userId', '==', user.uid),
+        limit(1)
+      )
+      const walletsSnapshot = await getDocs(walletsQuery)
+
+      if (!walletsSnapshot.empty) {
+        const docSnap = walletsSnapshot.docs[0]
+        const data = { id: docSnap.id, ...docSnap.data() } as Wallet
+        setWalletState({
+          wallet: data,
+          transactions: Array.isArray(data.transactions) ? data.transactions : [],
+        })
+      } else {
+        setWalletState(emptyState)
+      }
+    } catch (error) {
+      console.error('Error loading wallet:', error)
+      setWalletState(emptyState)
+    } finally {
+      setLoading(false)
+    }
+  }, [firestore, user])
+
+  useEffect(() => {
+    fetchWallet()
+  }, [fetchWallet])
+
+  const sortedTransactions = useMemo(
+    () =>
+      [...transactions].sort((a: any, b: any) => {
+        const aTime = typeof a?.createdAt?.toDate === 'function' ? a.createdAt.toDate().getTime() : new Date(a?.createdAt || 0).getTime()
+        const bTime = typeof b?.createdAt?.toDate === 'function' ? b.createdAt.toDate().getTime() : new Date(b?.createdAt || 0).getTime()
+        return bTime - aTime
+      }),
+    [transactions]
+  )
+
+  const balance = wallet?.balance ?? 0
+
+  const handleWithdraw = useCallback(async () => {
+    if (!user) return
+    const amount = Number(withdrawAmount)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast({
+        title: 'Montant invalide',
+        description: 'Entrez un montant de retrait valide.',
+        variant: 'destructive',
+      })
+      return
+    }
+    if (!withdrawPhone.trim()) {
+      toast({
+        title: 'Numero requis',
+        description: 'Entrez un numero Mobile Money.',
+        variant: 'destructive',
+      })
+      return
+    }
+    if (amount > balance) {
+      toast({
+        title: 'Solde insuffisant',
+        description: 'Votre solde ne permet pas ce retrait.',
+        variant: 'destructive',
+      })
+      return
     }
 
-    fetchWallet()
-  }, [firestore, user])
+    setIsWithdrawing(true)
+    try {
+      const response = await fetch('/api/wonyapay/withdraw/initiate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.uid,
+          amount,
+          phoneNumber: withdrawPhone.trim(),
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data?.error || 'Retrait WonyaPay impossible')
+      }
+
+      if (data?.transactionStatus === 'pending') {
+        toast({
+          title: 'Retrait initie',
+          description: 'Le retrait est en cours de confirmation chez l’operateur.',
+        })
+
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 4000))
+          const statusResponse = await fetch('/api/wonyapay/withdraw/status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: user.uid,
+              transactionId: data.transactionId,
+            }),
+          })
+          const statusData = await statusResponse.json()
+          if (!statusResponse.ok) {
+            throw new Error(statusData?.error || 'Impossible de verifier le retrait')
+          }
+          if (statusData?.transactionStatus === 'completed') {
+            break
+          }
+          if (statusData?.transactionStatus === 'failed') {
+            throw new Error(statusData?.message || 'Retrait refuse ou annule')
+          }
+        }
+      }
+
+      await fetchWallet()
+      setShowWithdrawDialog(false)
+      setWithdrawAmount('')
+      toast({
+        title: 'Retrait traite',
+        description: 'Votre retrait WonyaPay a ete pris en compte.',
+      })
+    } catch (error: any) {
+      toast({
+        title: 'Retrait echoue',
+        description: error?.message || 'Veuillez reessayer.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsWithdrawing(false)
+    }
+  }, [balance, fetchWallet, toast, user, withdrawAmount, withdrawPhone])
 
   if (userLoading || loading) {
     return (
@@ -91,8 +203,6 @@ export default function WalletPage() {
   if (!user) {
     return null
   }
-
-  const balance = wallet?.balance ?? 0
 
   return (
     <div className="w-full max-w-3xl mx-auto px-4 pt-[calc(1.5rem+env(safe-area-inset-top))] pb-[calc(6rem+env(safe-area-inset-bottom))] space-y-6">
@@ -156,7 +266,7 @@ export default function WalletPage() {
       </Card>
 
       <div className="flex flex-wrap gap-3">
-        <Button size="lg" className="gap-2">
+        <Button size="lg" className="gap-2" onClick={() => setShowWithdrawDialog(true)}>
           <ArrowUpRight className="h-4 w-4" />
           Retirer
         </Button>
@@ -185,7 +295,7 @@ export default function WalletPage() {
             </div>
           ) : (
             <div className="space-y-3">
-              {transactions.slice(0, 6).map((transaction) => (
+              {sortedTransactions.slice(0, 6).map((transaction) => (
                 <div
                   key={transaction.id}
                   className="flex items-center justify-between rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3"
@@ -207,6 +317,43 @@ export default function WalletPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={showWithdrawDialog} onOpenChange={setShowWithdrawDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Retirer avec WonyaPay</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-xl border border-primary/15 bg-primary/5 p-3 text-sm text-muted-foreground">
+              Le retrait sera envoye via WonyaPay Mobile Money en USD.
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="withdraw-amount">Montant (USD)</Label>
+              <Input
+                id="withdraw-amount"
+                type="number"
+                min="0"
+                step="0.01"
+                value={withdrawAmount}
+                onChange={(e) => setWithdrawAmount(e.target.value)}
+                placeholder="10"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="withdraw-phone">Numero Mobile Money</Label>
+              <Input
+                id="withdraw-phone"
+                value={withdrawPhone}
+                onChange={(e) => setWithdrawPhone(e.target.value)}
+                placeholder="0997654321"
+              />
+            </div>
+            <Button className="w-full" onClick={handleWithdraw} disabled={isWithdrawing}>
+              {isWithdrawing ? 'Traitement...' : 'Confirmer le retrait'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

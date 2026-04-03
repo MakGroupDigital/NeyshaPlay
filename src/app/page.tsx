@@ -28,6 +28,32 @@ import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 
+type PendingItem = { purchaseId: string; videoId?: string }
+const PENDING_KEY = 'pendingPurchases'
+
+const readPending = (): PendingItem[] => {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = localStorage.getItem(PENDING_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) return parsed.filter((p) => p?.purchaseId)
+    return []
+  } catch {
+    return []
+  }
+}
+
+const writePending = (list: PendingItem[]) => {
+  if (typeof window === 'undefined') return
+  localStorage.setItem(PENDING_KEY, JSON.stringify(list))
+}
+
+const notifyPendingUpdate = () => {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('pending-purchase-added'))
+}
+
 const DEFAULT_PAGE_SIZE = 6;
 
 function resolvePageSize() {
@@ -83,6 +109,7 @@ export default function Home() {
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [unlockedMap, setUnlockedMap] = useState<Record<string, boolean>>({});
+  const [pendingStatus, setPendingStatus] = useState<Record<string, 'pending' | 'failed' | 'completed'>>({});
   const [feedGender, setFeedGender] = useState<'female' | 'male' | 'all' | null>(null);
   const [globalMuted, setGlobalMuted] = useState(true); // État global du son
   const loadMoreRef = useRef<HTMLDivElement>(null);
@@ -131,6 +158,30 @@ export default function Home() {
       }
     }
   }, [feedGender, profile?.feedGender, profile?.gender]);
+
+  // Écoute globale des statuts d'achat (watcher)
+  useEffect(() => {
+    const handler = (event: any) => {
+      const detail = event?.detail as { videoId?: string; status?: string } | undefined
+      if (!detail?.videoId) return
+      if (detail.status === 'completed') {
+        setUnlockedMap((prev) => ({ ...prev, [detail.videoId!]: true }))
+        setPendingStatus((prev) => ({ ...prev, [detail.videoId!]: 'completed' }))
+        toast({ title: 'Accès débloqué', description: 'Vous pouvez maintenant regarder ce contenu.' })
+      } else if (detail.status === 'failed') {
+        setPendingStatus((prev) => ({ ...prev, [detail.videoId!]: 'failed' }))
+        setUnlockedMap((prev) => ({ ...prev, [detail.videoId!]: false }))
+        toast({
+          title: 'Paiement non abouti',
+          description: 'Vous pouvez réessayer plus tard.',
+          variant: 'destructive',
+        })
+      }
+    }
+
+    window.addEventListener('purchase-status', handler)
+    return () => window.removeEventListener('purchase-status', handler)
+  }, [toast])
 
   const fallbackUser = useMemo(
     () =>
@@ -357,7 +408,11 @@ export default function Home() {
   }, [firestore, videos]);
 
   const handlePay = useCallback(
-    async (video: Video, method: 'mobile-money' | 'card' | 'wallet' | 'paypal') => {
+    async (
+      video: Video,
+      method: 'mobile-money' | 'wallet' | 'paypal',
+      details?: { phoneNumber?: string }
+    ) => {
       if (!authUser) {
         router.push('/login');
         return;
@@ -386,6 +441,54 @@ export default function Home() {
           toast({
             title: 'Paiement PayPal échoué',
             description: 'Veuillez réessayer.',
+            variant: 'destructive',
+          })
+          throw error
+        }
+      }
+
+      if (method === 'mobile-money') {
+        try {
+          const response = await fetch('/api/wonyapay/purchase/initiate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: authUser.uid,
+              videoId: video.id,
+              phoneNumber: details?.phoneNumber,
+            }),
+          })
+          const data = await response.json()
+          if (!response.ok) {
+            throw new Error(data?.error || 'Paiement WonyaPay echoue')
+          }
+          if (data?.transactionStatus === 'completed') {
+            setUnlockedMap((prev) => ({ ...prev, [video.id]: true }))
+            setPendingStatus((prev) => ({ ...prev, [video.id]: 'completed' }))
+            toast({
+              title: 'Acces debloque',
+              description: 'Vous pouvez maintenant regarder ce contenu.',
+            })
+            return
+          }
+
+          // En attente : stocker et laisser le watcher gérer
+          const existing = readPending()
+          writePending([...existing, { purchaseId: data.purchaseId, videoId: video.id }])
+          notifyPendingUpdate()
+          setPendingStatus((prev) => ({ ...prev, [video.id]: 'pending' }))
+          setUnlockedMap((prev) => ({ ...prev, [video.id]: false }))
+          toast({
+            title: 'Confirmation requise',
+            description: 'Nous sommes en attente de la confirmation de votre paiement.',
+          })
+          return
+        } catch (error: any) {
+          setUnlockedMap((prev) => ({ ...prev, [video.id]: false }))
+          setPendingStatus((prev) => ({ ...prev, [video.id]: 'failed' }))
+          toast({
+            title: 'Paiement WonyaPay echoue',
+            description: error?.message || 'Veuillez reessayer.',
             variant: 'destructive',
           })
           throw error
@@ -517,12 +620,14 @@ export default function Home() {
             Boolean((video.isPaid ?? false) || Number(video.price || 0) > 0) &&
             !isOwner &&
             !unlockedMap[video.id];
+          const status = pendingStatus[video.id];
 
           return (
             <VideoCard
               key={video.id}
               video={video}
               isLocked={isLocked}
+              pendingStatus={status}
               onPay={handlePay}
               globalMuted={globalMuted}
               onMuteToggle={setGlobalMuted}

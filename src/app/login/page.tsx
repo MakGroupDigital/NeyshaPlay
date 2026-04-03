@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { useAuth } from '@/firebase'
+import { useEffect, useState } from 'react'
+import { useAuth, useUser } from '@/firebase'
 import { Button } from '@/components/ui/button'
 import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth'
 import { useToast } from '@/hooks/use-toast'
@@ -25,12 +25,19 @@ function GoogleIcon() {
 
 export default function LoginPage() {
   const auth = useAuth()
+  const { user: authUser, loading: userLoading } = useUser()
   const firestore = useFirestore()
   const { toast } = useToast()
   const router = useRouter()
   const [showRoleSelection, setShowRoleSelection] = useState(false)
   const [pendingUser, setPendingUser] = useState<any>(null)
   const [isCreatingProfile, setIsCreatingProfile] = useState(false)
+
+  useEffect(() => {
+    if (!userLoading && authUser) {
+      router.replace('/')
+    }
+  }, [authUser, userLoading, router])
 
   const createUserProfile = async (user: any, role: UserRole, gender: 'male' | 'female', feedGender: 'male' | 'female' | 'all') => {
     if (!firestore) return

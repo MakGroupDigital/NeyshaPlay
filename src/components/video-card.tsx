@@ -8,11 +8,12 @@ import { Card } from '@/components/ui/card'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { cn } from '@/lib/utils'
 import type { Video } from '@/lib/types'
-import { Heart, MessageCircle, Send, Music, Volume2, VolumeX, Lock, CreditCard, Smartphone, Wallet, ShoppingBag } from 'lucide-react'
+import { Heart, MessageCircle, Send, Music, Volume2, VolumeX, Lock, Smartphone, Wallet, ShoppingBag } from 'lucide-react'
 import { ClientFormattedNumber } from './client-formatted-number'
 import { useFirestore, useUser } from '@/firebase'
 import { useRouter } from 'next/navigation'
 import { useToast } from '@/hooks/use-toast'
+import { Input } from '@/components/ui/input'
 import {
   addDoc,
   collection,
@@ -29,14 +30,17 @@ import {
   updateDoc,
 } from 'firebase/firestore'
 
-type PaymentMethod = 'mobile-money' | 'card' | 'wallet' | 'paypal'
+type PaymentMethod = 'mobile-money' | 'wallet' | 'paypal'
+
+type PendingStatus = 'pending' | 'failed' | 'completed' | undefined
 
 type VideoCardProps = {
   video: Video
   isLocked?: boolean
-  onPay?: (video: Video, method: PaymentMethod) => Promise<void> | void
+  onPay?: (video: Video, method: PaymentMethod, details?: { phoneNumber?: string }) => Promise<void> | void
   globalMuted?: boolean
   onMuteToggle?: (muted: boolean) => void
+  pendingStatus?: PendingStatus
 }
 
 type VideoComment = {
@@ -48,7 +52,7 @@ type VideoComment = {
   createdAt?: Date
 }
 
-export function VideoCard({ video, isLocked = false, onPay, globalMuted = true, onMuteToggle }: VideoCardProps) {
+export function VideoCard({ video, isLocked = false, onPay, globalMuted = true, onMuteToggle, pendingStatus }: VideoCardProps) {
   const firestore = useFirestore()
   const { user: authUser } = useUser()
   const router = useRouter()
@@ -63,15 +67,19 @@ export function VideoCard({ video, isLocked = false, onPay, globalMuted = true, 
   const [comments, setComments] = useState<VideoComment[]>([])
   const [commentsLoading, setCommentsLoading] = useState(false)
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('mobile-money')
+  const [paymentPhone, setPaymentPhone] = useState('')
   const [isPaying, setIsPaying] = useState(false)
   const [localUnlocked, setLocalUnlocked] = useState(false)
   const [likeBursts, setLikeBursts] = useState<Array<{ id: string; x: number; y: number }>>([])
+  const [showDetails, setShowDetails] = useState(true)
   const isPaypal = paymentMethod === 'paypal'
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const numericPrice = typeof video.price === 'number' ? video.price : Number(video.price || 0)
   const isPaidContent = Boolean((video.isPaid ?? false) || numericPrice > 0)
   const locked = isPaidContent && isLocked && !localUnlocked
+  const showPending = locked && pendingStatus === 'pending'
+  const showFailed = locked && pendingStatus === 'failed'
   const displayPrice = Number.isFinite(numericPrice) ? numericPrice : 0
   const displayCurrency = video.currency ?? 'USD'
 
@@ -233,15 +241,7 @@ export function VideoCard({ video, isLocked = false, onPay, globalMuted = true, 
       setShowPaySheet(true)
       return
     }
-    if (videoRef.current) {
-        if(videoRef.current.paused) {
-            videoRef.current.play()
-            setIsPlaying(true)
-        } else {
-            videoRef.current.pause()
-            setIsPlaying(false)
-        }
-    }
+    setShowDetails((prev) => !prev)
   }
 
   // Synchroniser le mute avec globalMuted
@@ -339,21 +339,32 @@ export function VideoCard({ video, isLocked = false, onPay, globalMuted = true, 
   const handlePay = async (event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
     if (!isPaidContent) return
+    if (paymentMethod === 'mobile-money' && !paymentPhone.trim()) {
+      toast({
+        title: 'Numero requis',
+        description: 'Entrez un numero Mobile Money pour continuer.',
+        variant: 'destructive',
+      })
+      return
+    }
 
     setIsPaying(true)
-    if (!isPaypal) {
+    if (!isPaypal && paymentMethod !== 'mobile-money') {
       setLocalUnlocked(true)
       setShowPaySheet(false)
     }
 
     try {
-      await onPay?.(video, paymentMethod)
+      await onPay?.(video, paymentMethod, { phoneNumber: paymentPhone.trim() })
       if (isPaypal) {
+        setShowPaySheet(false)
+      }
+      if (paymentMethod === 'mobile-money') {
         setShowPaySheet(false)
       }
     } catch (error) {
       console.error('Payment failed:', error)
-      if (!isPaypal) {
+      if (!isPaypal && paymentMethod !== 'mobile-money') {
         setLocalUnlocked(false)
       }
       setShowPaySheet(true)
@@ -403,10 +414,30 @@ export function VideoCard({ video, isLocked = false, onPay, globalMuted = true, 
             <div className="h-full w-full bg-black" />
           )}
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+          {showPending && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="rounded-2xl bg-background/90 px-4 py-3 text-center shadow-lg border border-primary/30">
+                <p className="text-sm font-semibold text-primary">Paiement en attente</p>
+                <p className="text-xs text-muted-foreground">Nous attendons la confirmation de l’opérateur.</p>
+              </div>
+            </div>
+          )}
+          {showFailed && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="rounded-2xl bg-background/90 px-4 py-3 text-center shadow-lg border border-destructive/40">
+                <p className="text-sm font-semibold text-destructive">Paiement non abouti</p>
+                <p className="text-xs text-muted-foreground">Réessayez avec Mobile Money ou PayPal.</p>
+              </div>
+            </div>
+          )}
         </div>
       )}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-black/20" />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,0.45)_75%)]" />
+      {showDetails && (
+        <>
+          <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-black/20" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,0.45)_75%)]" />
+        </>
+      )}
 
       {isPaidContent && (
         <div className="absolute top-[calc(1rem+env(safe-area-inset-top))] left-[calc(1rem+env(safe-area-inset-left))] z-20 inline-flex items-center gap-2 rounded-full bg-black/60 px-3 py-1 text-xs text-white">
@@ -438,18 +469,20 @@ export function VideoCard({ video, isLocked = false, onPay, globalMuted = true, 
         </div>
       )}
 
-      <div className="absolute bottom-[calc(6rem+env(safe-area-inset-bottom))] left-0 right-0 p-4 text-white">
-        <div className="max-w-[85%] rounded-2xl border border-white/15 bg-black/45 p-4 shadow-xl shadow-black/50 backdrop-blur-md">
-          <Link href={`/u/${video.user.id}`} className="font-bold font-headline hover:underline">
-            {video.user.username}
-          </Link>
-          <p className="text-sm text-foreground/80">{video.description}</p>
-          <div className="flex items-center gap-2 mt-2 text-sm text-foreground/80">
-            <Music className="w-4 h-4" />
-            <span>{video.song}</span>
+      {showDetails && (
+        <div className="absolute bottom-[calc(6rem+env(safe-area-inset-bottom))] left-0 right-0 p-4 text-white">
+          <div className="max-w-[85%] rounded-2xl border border-white/15 bg-black/45 p-4 shadow-xl shadow-black/50 backdrop-blur-md">
+            <Link href={`/u/${video.user.id}`} className="font-bold font-headline hover:underline">
+              {video.user.username}
+            </Link>
+            <p className="text-sm text-foreground/80">{video.description}</p>
+            <div className="flex items-center gap-2 mt-2 text-sm text-foreground/80">
+              <Music className="w-4 h-4" />
+              <span>{video.song}</span>
+            </div>
           </div>
         </div>
-      </div>
+      )}
       
       {!locked && (
         <div className="absolute right-0 bottom-[calc(5rem+env(safe-area-inset-bottom))] flex flex-col items-end gap-3">
@@ -631,7 +664,7 @@ export function VideoCard({ video, isLocked = false, onPay, globalMuted = true, 
                   </div>
                   <div>
                     <p className="text-sm font-medium">PayPal</p>
-                    <p className="text-xs text-muted-foreground">PayPal, carte, Apple Pay*</p>
+                    <p className="text-xs text-muted-foreground">Paiement par carte de crédit ou débit (Mastercard, Visa), Apple Pay et compte PayPal</p>
                   </div>
                 </div>
                 <RadioGroupItem value="paypal" />
@@ -641,20 +674,10 @@ export function VideoCard({ video, isLocked = false, onPay, globalMuted = true, 
                   <Smartphone className="h-5 w-5 text-primary" />
                   <div>
                     <p className="text-sm font-medium">Mobile Money</p>
-                    <p className="text-xs text-muted-foreground">M‑Pesa, Airtel, Orange</p>
+                    <p className="text-xs text-muted-foreground">M-Pesa, Airtel, Orange, Africell</p>
                   </div>
                 </div>
                 <RadioGroupItem value="mobile-money" />
-              </label>
-              <label className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3">
-                <div className="flex items-center gap-3">
-                  <CreditCard className="h-5 w-5 text-primary" />
-                  <div>
-                    <p className="text-sm font-medium">Carte bancaire</p>
-                    <p className="text-xs text-muted-foreground">Visa / Mastercard</p>
-                  </div>
-                </div>
-                <RadioGroupItem value="card" />
               </label>
               <label className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3">
                 <div className="flex items-center gap-3">
@@ -667,6 +690,21 @@ export function VideoCard({ video, isLocked = false, onPay, globalMuted = true, 
                 <RadioGroupItem value="wallet" />
               </label>
             </RadioGroup>
+
+            {paymentMethod === 'mobile-money' && (
+              <div className="mt-4 space-y-2">
+                <label className="text-sm font-medium">Numero Mobile Money</label>
+                <Input
+                  placeholder="0997654321"
+                  value={paymentPhone}
+                  onChange={(e) => setPaymentPhone(e.target.value)}
+                  className="h-11 border-white/10 bg-white/5"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Le paiement sera initie via WonyaPay et confirme sur votre telephone.
+                </p>
+              </div>
+            )}
 
             <Button className="mt-5 w-full" disabled={isPaying} onClick={handlePay}>
               {isPaying ? 'Paiement en cours...' : `Payer ${displayPrice} ${displayCurrency}`}

@@ -41,6 +41,10 @@ export type Transaction = {
     videoId?: string
     orderId?: string
     withdrawalMethod?: string
+    providerReference?: string
+    phoneNumber?: string
+    refunded?: boolean
+    providerStatus?: string
   }
 }
 
