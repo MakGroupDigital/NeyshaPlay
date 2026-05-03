@@ -24,6 +24,16 @@ import { type Video, type User } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Search, Play, Users } from 'lucide-react';
 
 const DEFAULT_PAGE_SIZE = 6;
 const FEED_SIGNAL_VERSION = 1;
@@ -205,6 +215,14 @@ function resolvePageSize() {
   }
 }
 
+function normalizeSearchValue(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+}
+
 function VideoCardSkeleton() {
   return (
     <div className="relative h-[100dvh] w-full snap-start snap-always overflow-hidden rounded-none bg-black">
@@ -239,6 +257,12 @@ export default function Home() {
   const [feedGender, setFeedGender] = useState<'female' | 'male' | 'all' | null>(null);
   const [showFeedGenderTabs, setShowFeedGenderTabs] = useState(false);
   const [globalMuted, setGlobalMuted] = useState(true); // État global du son
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchCreators, setSearchCreators] = useState<User[]>([]);
+  const [searchVideos, setSearchVideos] = useState<Video[]>([]);
+  const [suggestedCreators, setSuggestedCreators] = useState<User[]>([]);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const userCache = useRef<Map<string, User>>(new Map());
   const migratedRef = useRef<Set<string>>(new Set());
@@ -462,6 +486,94 @@ export default function Home() {
   }, [firestore, loadInitial]);
 
   useEffect(() => {
+    if (!firestore || !searchOpen) return;
+    let cancelled = false;
+
+    const loadSuggestions = async () => {
+      try {
+        const creatorsQuery = query(
+          collection(firestore, 'users'),
+          orderBy('likes', 'desc'),
+          limit(8)
+        );
+        const snapshot = await getDocs(creatorsQuery);
+        if (cancelled) return;
+        setSuggestedCreators(
+          snapshot.docs
+            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as User)
+            .filter((creator) => creator.role === 'creator')
+            .slice(0, 6)
+        );
+      } catch (error) {
+        console.error('Error loading creator suggestions:', error);
+      }
+    };
+
+    loadSuggestions();
+    return () => {
+      cancelled = true;
+    };
+  }, [firestore, searchOpen]);
+
+  useEffect(() => {
+    if (!firestore || !searchOpen) return;
+    let cancelled = false;
+    const normalizedTerm = normalizeSearchValue(searchTerm);
+
+    if (normalizedTerm.length < 2) {
+      setSearchCreators([]);
+      setSearchVideos([]);
+      setSearchLoading(false);
+      return;
+    }
+
+    const searchTimeout = window.setTimeout(async () => {
+      setSearchLoading(true);
+      try {
+        const [usersSnapshot, videosSnapshot] = await Promise.all([
+          getDocs(query(collection(firestore, 'users'), orderBy('likes', 'desc'), limit(80))),
+          getDocs(query(collection(firestore, 'videos'), orderBy('createdAt', 'desc'), limit(80))),
+        ]);
+        if (cancelled) return;
+
+        const creators = usersSnapshot.docs
+          .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as User)
+          .filter((creator) => {
+            if (creator.role !== 'creator') return false;
+            const searchable = normalizeSearchValue(
+              `${creator.name || ''} ${creator.username || ''} ${creator.bio || ''} ${creator.city || ''} ${creator.country || ''}`
+            );
+            return searchable.includes(normalizedTerm);
+          })
+          .slice(0, 8);
+
+        const builtVideos = await buildVideos(videosSnapshot.docs);
+        if (cancelled) return;
+        const matchingVideos = builtVideos
+          .filter((video) => {
+            const searchable = normalizeSearchValue(
+              `${video.description || ''} ${video.song || ''} ${video.user?.name || ''} ${video.user?.username || ''}`
+            );
+            return searchable.includes(normalizedTerm);
+          })
+          .slice(0, 10);
+
+        setSearchCreators(creators);
+        setSearchVideos(matchingVideos);
+      } catch (error) {
+        console.error('Search error:', error);
+      } finally {
+        if (!cancelled) setSearchLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(searchTimeout);
+    };
+  }, [buildVideos, firestore, searchOpen, searchTerm]);
+
+  useEffect(() => {
     if (!firestore || !authUser || videos.length === 0) return;
     let cancelled = false;
 
@@ -654,9 +766,163 @@ export default function Home() {
     </div>
   );
 
+  const openCreator = (creator: User) => {
+    setSearchOpen(false);
+    router.push(`/u/${creator.id}`);
+  };
+
+  const openVideoFromSearch = (video: Video) => {
+    setSearchOpen(false);
+    setVideos((prev) => {
+      const existing = prev.filter((item) => item.id !== video.id);
+      return [video, ...existing];
+    });
+    window.setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 50);
+  };
+
+  const searchPanel = (
+    <Dialog open={searchOpen} onOpenChange={setSearchOpen}>
+      <DialogContent className="top-[calc(1rem+env(safe-area-inset-top))] max-h-[calc(100dvh-2rem)] translate-y-0 overflow-hidden p-0 sm:max-w-xl">
+        <DialogHeader className="border-b border-white/10 px-5 pb-4 pt-5">
+          <DialogTitle className="flex items-center gap-2">
+            <Search className="h-5 w-5 text-primary" />
+            Recherche
+          </DialogTitle>
+          <div className="relative pt-2">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              autoFocus
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder="Rechercher un nom ou un contenu"
+              className="h-11 rounded-full pl-9 pr-4"
+            />
+          </div>
+        </DialogHeader>
+
+        <div className="max-h-[calc(100dvh-10rem)] space-y-5 overflow-y-auto px-5 py-4">
+          {searchTerm.trim().length >= 2 && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-white">Créateurs</h3>
+                {searchLoading && <span className="text-xs text-muted-foreground">Recherche...</span>}
+              </div>
+              {searchCreators.length > 0 ? (
+                <div className="space-y-2">
+                  {searchCreators.map((creator) => (
+                    <button
+                      key={creator.id}
+                      type="button"
+                      onClick={() => openCreator(creator)}
+                      className="flex w-full items-center gap-3 rounded-lg border border-white/10 bg-white/5 p-3 text-left transition-colors hover:bg-white/10"
+                    >
+                      <Avatar className="h-11 w-11">
+                        <AvatarImage src={creator.avatarUrl} alt={creator.name} />
+                        <AvatarFallback>{creator.name?.charAt(0) || 'U'}</AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold">{creator.name}</p>
+                        <p className="truncate text-xs text-muted-foreground">{creator.username}</p>
+                      </div>
+                      <span className="text-xs text-primary">{Number(creator.likes || 0).toLocaleString()} likes</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                !searchLoading && (
+                  <p className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm text-muted-foreground">
+                    Aucun créateur trouvé.
+                  </p>
+                )
+              )}
+            </div>
+          )}
+
+          {searchTerm.trim().length >= 2 && (
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-white">Contenus</h3>
+              {searchVideos.length > 0 ? (
+                <div className="space-y-2">
+                  {searchVideos.map((video) => (
+                    <button
+                      key={video.id}
+                      type="button"
+                      onClick={() => openVideoFromSearch(video)}
+                      className="flex w-full items-center gap-3 rounded-lg border border-white/10 bg-white/5 p-3 text-left transition-colors hover:bg-white/10"
+                    >
+                      <div className="flex h-14 w-10 shrink-0 items-center justify-center overflow-hidden rounded-md bg-black">
+                        {video.thumbnailUrl ? (
+                          <img src={video.thumbnailUrl} alt="" className="h-full w-full object-cover" />
+                        ) : (
+                          <Play className="h-4 w-4 text-white/70" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="line-clamp-2 text-sm font-medium">{video.description || 'Contenu vidéo'}</p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {video.user?.username} · {Number(video.likes || 0).toLocaleString()} likes
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                !searchLoading && (
+                  <p className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm text-muted-foreground">
+                    Aucun contenu trouvé.
+                  </p>
+                )
+              )}
+            </div>
+          )}
+
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Users className="h-4 w-4 text-primary" />
+              <h3 className="text-sm font-semibold text-white">Suggestions créateurs</h3>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {suggestedCreators.map((creator) => (
+                <button
+                  key={creator.id}
+                  type="button"
+                  onClick={() => openCreator(creator)}
+                  className="rounded-lg border border-white/10 bg-white/5 p-3 text-center transition-colors hover:bg-white/10"
+                >
+                  <Avatar className="mx-auto h-12 w-12">
+                    <AvatarImage src={creator.avatarUrl} alt={creator.name} />
+                    <AvatarFallback>{creator.name?.charAt(0) || 'U'}</AvatarFallback>
+                  </Avatar>
+                  <p className="mt-2 truncate text-xs font-semibold">{creator.name}</p>
+                  <p className="truncate text-[11px] text-muted-foreground">{creator.username}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+
+  const searchButton = (
+    <div className="fixed right-[calc(1rem+env(safe-area-inset-right))] top-[calc(1rem+env(safe-area-inset-top))] z-40">
+      <Button
+        type="button"
+        size="icon"
+        className="h-11 w-11 rounded-full border border-white/15 bg-black/65 text-white shadow-lg shadow-black/30 backdrop-blur-md hover:bg-black/80"
+        onClick={() => setSearchOpen(true)}
+        aria-label="Rechercher"
+      >
+        <Search className="h-5 w-5" />
+      </Button>
+    </div>
+  );
+
   if (loading) {
     return (
       <div className="w-full">
+        {searchButton}
+        {searchPanel}
         {showFeedGenderTabs && genderTabs}
         <div className="w-full md:mx-auto md:max-w-[640px]">
           {Array.from({ length: 2 }).map((_, index) => (
@@ -669,6 +935,8 @@ export default function Home() {
 
   return (
     <div className="w-full">
+      {searchButton}
+      {searchPanel}
       {showFeedGenderTabs && genderTabs}
       <div className="w-full md:mx-auto md:max-w-[640px]">
         {videos.map((video) => {
