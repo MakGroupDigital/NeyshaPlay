@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Play, Plus, User as UserIcon, Search, Wallet } from 'lucide-react'
+import { Bell, Play, Plus, User as UserIcon, Wallet } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
@@ -21,7 +21,7 @@ export function BottomNavBar() {
     return doc(firestore, 'users', authUser.uid)
   }, [firestore, authUser])
 
-  const { data: profile } = useDoc<User>(userDocRef)
+  const { data: profile } = useDoc<User>(userDocRef as any)
 
   useEffect(() => {
     if (!authUser) {
@@ -63,7 +63,7 @@ export function BottomNavBar() {
       // Not logged in - show basic menu
       return [
         { href: '/', label: 'Play', icon: Play },
-        { href: '/discover', label: 'Rechercher', icon: Search },
+        { href: '/wallet', label: 'Wallet', icon: Wallet, auth: true },
         { href: '/profile', label: 'Profil', icon: UserIcon, auth: true },
       ]
     }
@@ -73,7 +73,8 @@ export function BottomNavBar() {
       return [
         { href: '/', label: 'Play', icon: Play },
         { href: '/create', label: 'Créer', icon: Plus, center: true },
-        { href: '/wallet', label: 'Portefeuille', icon: Wallet, auth: true },
+        { href: '/wallet', label: 'Wallet', icon: Wallet, auth: true },
+        { href: '/notifications', label: 'Notif', icon: Bell, auth: true },
         { href: '/profile', label: 'Profil', icon: UserIcon, auth: true },
       ]
     }
@@ -81,7 +82,8 @@ export function BottomNavBar() {
     // User menu (default)
     return [
       { href: '/', label: 'Play', icon: Play },
-      { href: '/discover', label: 'Rechercher', icon: Search },
+      { href: '/wallet', label: 'Wallet', icon: Wallet, auth: true },
+      { href: '/notifications', label: 'Notif', icon: Bell, auth: true },
       { href: '/profile', label: 'Profil', icon: UserIcon, auth: true },
     ]
   }

@@ -2,9 +2,11 @@
 
 import {
   Home,
+  Bell,
   Search,
   PlusSquare,
   User,
+  Wallet,
 } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
@@ -23,6 +25,8 @@ import { Separator } from '../ui/separator'
 const menuItems = [
   { href: '/', label: 'Flux', icon: Home },
   { href: '/discover', label: 'Découvrir', icon: Search },
+  { href: '/wallet', label: 'Wallet', icon: Wallet },
+  { href: '/notifications', label: 'Notifications', icon: Bell },
   { href: '/profile', label: 'Profil', icon: User },
 ]
 

@@ -27,6 +27,7 @@ import {
   setDoc,
   updateDoc,
 } from 'firebase/firestore'
+import { createAppNotification } from '@/lib/notifications'
 
 type PendingStatus = 'pending' | 'failed' | 'completed' | undefined
 type UnlockResult = { status: 'unlocked' } | { status: 'insufficient'; balance: number; amount: number }
@@ -72,6 +73,7 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
   const [showDetails, setShowDetails] = useState(true)
 
   const videoRef = useRef<HTMLVideoElement>(null)
+  const viewRecordedRef = useRef(false)
   const numericPrice = typeof video.price === 'number' ? video.price : Number(video.price || 0)
   const isPaidContent = Boolean((video.isPaid ?? false) || numericPrice > 0)
   const locked = isPaidContent && isLocked && !localUnlocked
@@ -127,6 +129,7 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
     try {
       const likeRef = doc(firestore, 'videos', video.id, 'likes', authUser.uid)
       const videoRef = doc(firestore, 'videos', video.id)
+      const creatorId = (video.userRef as any)?.id ?? video.user?.id
       if (newLikedState) {
         onFeedSignal?.(video, 'like')
         await setDoc(likeRef, {
@@ -139,6 +142,29 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
       await updateDoc(videoRef, {
         likes: increment(newLikedState ? 1 : -1),
       })
+      if (creatorId) {
+        await updateDoc(doc(firestore, 'users', creatorId), {
+          likes: increment(newLikedState ? 1 : -1),
+        }).catch(() => undefined)
+      }
+      if (newLikedState && creatorId && creatorId !== authUser.uid) {
+        const actorSnap = await getDoc(doc(firestore, 'users', authUser.uid)).catch(() => null)
+        const actor = actorSnap?.exists()
+          ? (actorSnap.data() as any)
+          : { name: authUser.displayName || 'Utilisateur', username: authUser.email || '', avatarUrl: authUser.photoURL || '' }
+        await createAppNotification(firestore, {
+          recipientId: creatorId,
+          actorId: authUser.uid,
+          actor: {
+            name: actor.name || 'Utilisateur',
+            username: actor.username || authUser.email || '',
+            avatarUrl: actor.avatarUrl || authUser.photoURL || '',
+          },
+          type: 'like',
+          content: `${actor.username || actor.name || 'Un utilisateur'} a aimé votre vidéo.`,
+          metadata: { videoId: video.id },
+        }).catch(() => undefined)
+      }
     } catch (error) {
       // Rollback on error
       setIsLiked(!newLikedState)
@@ -257,6 +283,14 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
       ([entry]) => {
         if (entry.isIntersecting) {
             onFeedSignal?.(video, 'view')
+            if (!viewRecordedRef.current && firestore) {
+              viewRecordedRef.current = true
+              updateDoc(doc(firestore, 'videos', video.id), {
+                views: increment(1),
+              }).catch(() => {
+                viewRecordedRef.current = false
+              })
+            }
             videoElement.play().catch(() => {
                 // Autoplay was prevented.
             });
@@ -280,7 +314,7 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
         observer.unobserve(videoElement);
       }
     };
-  }, [locked, onFeedSignal, video]);
+  }, [firestore, locked, onFeedSignal, video]);
 
   useEffect(() => {
     if (locked && videoRef.current) {

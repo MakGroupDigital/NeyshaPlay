@@ -8,13 +8,17 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { ClientFormattedNumber } from '@/components/client-formatted-number'
 import { useFirestore } from '@/firebase/provider'
-import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore'
-import { Lock, Pause, Play, Volume2, VolumeX, UserPlus, Users, Heart, X } from 'lucide-react'
+import { useUser } from '@/firebase'
+import { collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, query, runTransaction, setDoc, serverTimestamp, where } from 'firebase/firestore'
+import { Eye, Lock, Pause, Play, UserCheck, Volume2, VolumeX, UserPlus, Users, Heart, X } from 'lucide-react'
 import type { User, Video } from '@/lib/types'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { createAppNotification } from '@/lib/notifications'
 
 export default function PublicProfilePage() {
   const params = useParams()
   const firestore = useFirestore()
+  const { user: authUser } = useUser()
   const userId = Array.isArray(params.id) ? params.id[0] : params.id
   const normalizedId = typeof userId === 'string'
     ? decodeURIComponent(userId).replace(/^@/, '').trim()
@@ -23,6 +27,10 @@ export default function PublicProfilePage() {
   const [userData, setUserData] = useState<User | null>(null)
   const [userVideos, setUserVideos] = useState<Video[]>([])
   const [loading, setLoading] = useState(true)
+  const [profileRefPath, setProfileRefPath] = useState<string | null>(null)
+  const [isFollowing, setIsFollowing] = useState(false)
+  const [followBusy, setFollowBusy] = useState(false)
+  const [avatarOpen, setAvatarOpen] = useState(false)
 
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -62,8 +70,10 @@ export default function PublicProfilePage() {
 
         if (userDoc && userDoc.exists()) {
           setUserData({ id: userDoc.id, ...userDoc.data() } as User)
+          setProfileRefPath(userDoc.ref.path)
         } else {
           setUserData(null)
+          setProfileRefPath(null)
         }
 
         if (userDocRef) {
@@ -89,6 +99,26 @@ export default function PublicProfilePage() {
 
     fetchData()
   }, [firestore, normalizedId])
+
+  useEffect(() => {
+    if (!firestore || !profileRefPath) return
+    const unsubscribe = onSnapshot(doc(firestore, profileRefPath), (snapshot) => {
+      if (snapshot.exists()) {
+        setUserData({ id: snapshot.id, ...snapshot.data() } as User)
+      }
+    })
+    return () => unsubscribe()
+  }, [firestore, profileRefPath])
+
+  useEffect(() => {
+    if (!firestore || !authUser || !userData || authUser.uid === userData.id) {
+      setIsFollowing(false)
+      return
+    }
+    const followRef = doc(firestore, 'users', authUser.uid, 'following', userData.id)
+    const unsubscribe = onSnapshot(followRef, (snapshot) => setIsFollowing(snapshot.exists()))
+    return () => unsubscribe()
+  }, [authUser, firestore, userData])
 
   if (loading) {
     return (
@@ -166,20 +196,86 @@ export default function PublicProfilePage() {
     setIsMuted(videoRef.current.muted)
   }
 
+  const handleFollow = async () => {
+    if (!firestore || !userData || followBusy) return
+    if (!authUser) {
+      window.location.href = '/login'
+      return
+    }
+    if (authUser.uid === userData.id) return
+
+    setFollowBusy(true)
+    const followerRef = doc(firestore, 'users', authUser.uid)
+    const targetRef = doc(firestore, 'users', userData.id)
+    const followingRef = doc(firestore, 'users', authUser.uid, 'following', userData.id)
+    const followerDocRef = doc(firestore, 'users', userData.id, 'followers', authUser.uid)
+
+    try {
+      const nextFollowing = !isFollowing
+      await runTransaction(firestore, async (transaction) => {
+        const existing = await transaction.get(followingRef)
+        if (nextFollowing && !existing.exists()) {
+          transaction.set(followingRef, { userId: userData.id, createdAt: serverTimestamp() })
+          transaction.set(followerDocRef, { userId: authUser.uid, createdAt: serverTimestamp() })
+          transaction.update(followerRef, { following: increment(1) })
+          transaction.update(targetRef, { followers: increment(1) })
+        }
+        if (!nextFollowing && existing.exists()) {
+          transaction.delete(followingRef)
+          transaction.delete(followerDocRef)
+          transaction.update(followerRef, { following: increment(-1) })
+          transaction.update(targetRef, { followers: increment(-1) })
+        }
+      })
+
+      if (nextFollowing) {
+        const actorSnap = await getDoc(followerRef)
+        const actorData = actorSnap.exists() ? ({ id: actorSnap.id, ...actorSnap.data() } as User) : null
+        await createAppNotification(firestore, {
+          recipientId: userData.id,
+          actorId: authUser.uid,
+          actor: actorData
+            ? { name: actorData.name, username: actorData.username, avatarUrl: actorData.avatarUrl }
+            : { name: authUser.displayName || 'Utilisateur', username: authUser.email || '', avatarUrl: authUser.photoURL || '' },
+          type: 'follow',
+          content: `${actorData?.username || authUser.displayName || 'Un utilisateur'} vous suit maintenant.`,
+        })
+      }
+    } finally {
+      setFollowBusy(false)
+    }
+  }
+
   return (
     <div className="flex flex-col items-center pt-8">
       <div className="w-full max-w-4xl space-y-8 px-4">
         <div className="flex flex-col items-center gap-4">
-          <Avatar className="h-32 w-32 border-4 border-primary">
-            <AvatarImage src={userData.avatarUrl} alt={userData.name} />
-            <AvatarFallback className="text-4xl">{userData.name.charAt(0)}</AvatarFallback>
-          </Avatar>
+          <button type="button" onClick={() => setAvatarOpen(true)} className="rounded-full">
+            <Avatar className="h-32 w-32 border-4 border-primary">
+              <AvatarImage src={userData.avatarUrl} alt={userData.name} />
+              <AvatarFallback className="text-4xl">{userData.name.charAt(0)}</AvatarFallback>
+            </Avatar>
+          </button>
           <div className="text-center">
             <h1 className="text-3xl font-bold font-headline">{userData.name}</h1>
             <p className="text-muted-foreground">{userData.username}</p>
           </div>
           <p className="max-w-md text-center text-foreground/80">{userData.bio}</p>
-          <Button variant="secondary">Suivre</Button>
+          {authUser?.uid !== userData.id && (
+            <Button variant={isFollowing ? 'outline' : 'secondary'} onClick={handleFollow} disabled={followBusy}>
+              {isFollowing ? (
+                <>
+                  <UserCheck className="mr-2 h-4 w-4" />
+                  Abonné
+                </>
+              ) : (
+                <>
+                  <UserPlus className="mr-2 h-4 w-4" />
+                  Suivre
+                </>
+              )}
+            </Button>
+          )}
         </div>
 
         <div className="flex justify-center gap-6 border-y py-4">
@@ -200,7 +296,12 @@ export default function PublicProfilePage() {
         </div>
 
         <div>
-          <h2 className="text-xl font-bold font-headline mb-4 text-center">Vidéos</h2>
+          <div className="mb-4 text-center">
+            <h2 className="text-xl font-bold font-headline">Vidéos</h2>
+            <p className="text-sm text-muted-foreground">
+              Total J'aime: <ClientFormattedNumber value={userData.likes || 0} />
+            </p>
+          </div>
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-1">
             {userVideos.map((video) => {
               const isPaid = Boolean((video.isPaid ?? false) || Number(video.price || 0) > 0)
@@ -226,6 +327,10 @@ export default function PublicProfilePage() {
                         </div>
                       </div>
                     )}
+                    <div className="absolute bottom-1.5 left-1.5 inline-flex items-center gap-1 rounded-full bg-black/65 px-2 py-0.5 text-[11px] text-white">
+                      <Eye className="h-3 w-3" />
+                      <ClientFormattedNumber value={video.views || 0} />
+                    </div>
                   </div>
                 </Card>
               )
@@ -308,6 +413,13 @@ export default function PublicProfilePage() {
           </div>
         </div>
       )}
+      <Dialog open={avatarOpen} onOpenChange={setAvatarOpen}>
+        <DialogContent className="border-0 bg-black/95 p-0 shadow-none sm:max-w-2xl">
+          <div className="flex min-h-[70dvh] items-center justify-center p-6">
+            <img src={userData.avatarUrl} alt={userData.name} className="max-h-[80dvh] max-w-full rounded-2xl object-contain" />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -200,6 +200,21 @@ export async function purchaseVideoWithWallet(input: { userId: string; videoId: 
         transactions: [earningTransaction],
       })
     }
+
+    batch.set(doc(collection(firestore, 'notifications')), {
+      recipientId: creatorId,
+      actorId: input.userId,
+      actor: null,
+      type: 'purchase',
+      content: 'Votre contenu payant a été débloqué.',
+      read: false,
+      metadata: {
+        videoId: input.videoId,
+        purchaseId,
+        amount,
+      },
+      createdAt: serverTimestamp(),
+    })
   }
 
   await batch.commit()

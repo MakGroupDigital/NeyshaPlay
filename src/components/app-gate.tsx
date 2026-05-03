@@ -21,14 +21,7 @@ export function AppGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // Mark as client-side
     setIsClient(true);
-    
-    // Check local storage for age verification
-    try {
-      const storedAgeVerification = localStorage.getItem('isAgeVerified');
-      setIsAgeVerified(storedAgeVerification === 'true');
-    } catch (error) {
-      setIsAgeVerified(false);
-    }
+    setIsAgeVerified(false);
 
     // Splash screen timer
     const timer = setTimeout(() => {
@@ -55,11 +48,6 @@ export function AppGate({ children }: { children: React.ReactNode }) {
   }, [isSplashTimeOver, isAgeVerified, isClient]);
 
   const handleAgeVerified = () => {
-    try {
-      localStorage.setItem('isAgeVerified', 'true');
-    } catch (error) {
-       console.warn('Could not save age verification to localStorage');
-    }
     setIsAgeVerified(true);
     setStatus('ready');
   };

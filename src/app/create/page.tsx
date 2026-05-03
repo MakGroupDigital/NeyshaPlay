@@ -1072,6 +1072,7 @@ export default function CreatePage() {
         likes: 0,
         comments: 0,
         shares: 0,
+        views: 0,
         createdAt: serverTimestamp(),
         filter: recordedFilter,
         cloudinaryPublicId: cloudinaryResponse.public_id,

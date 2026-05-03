@@ -18,6 +18,12 @@ export async function POST(request: Request) {
     if (!userSnap.exists() || userSnap.data()?.role !== 'creator') {
       return NextResponse.json({ error: 'Retrait reserve aux comptes createurs' }, { status: 403 })
     }
+    if (userSnap.data()?.kycStatus !== 'approved') {
+      return NextResponse.json(
+        { error: 'Confirmez votre identité avant de retirer vos fonds' },
+        { status: 403 }
+      )
+    }
 
     const walletRef = await getWalletRefByUserId(userId)
     const walletSnap = await getDoc(walletRef)

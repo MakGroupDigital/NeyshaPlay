@@ -61,6 +61,7 @@ export default function WalletPage() {
   }, [firestore, user])
   const { data: profile } = useDoc<User>(userDocRef as any)
   const isCreator = profile?.role === 'creator'
+  const kycApproved = profile?.kycStatus === 'approved'
 
   useEffect(() => {
     if (!userLoading && !user) {
@@ -207,6 +208,14 @@ export default function WalletPage() {
       })
       return
     }
+    if (isCreator && !kycApproved) {
+      toast({
+        title: 'Identité à confirmer',
+        description: 'Votre KYC doit être approuvé avant le retrait des fonds.',
+        variant: 'destructive',
+      })
+      return
+    }
     if (!Number.isFinite(amount) || amount < MIN_WITHDRAW_AMOUNT) {
       toast({
         title: 'Montant invalide',
@@ -266,7 +275,7 @@ export default function WalletPage() {
     } finally {
       setIsWithdrawing(false)
     }
-  }, [balance, fetchWallet, toast, user, withdrawAmount, withdrawPhone])
+  }, [balance, fetchWallet, isCreator, kycApproved, toast, user, withdrawAmount, withdrawPhone])
 
   const handleDeposit = useCallback(async () => {
     if (!user) return
@@ -449,7 +458,9 @@ export default function WalletPage() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="rounded-xl border border-primary/15 bg-primary/5 p-3 text-sm text-muted-foreground">
-              {hasMinimumWithdrawBalance
+              {!kycApproved
+                ? 'Vous pouvez utiliser la plateforme librement, mais le retrait est bloqué tant que votre identité créateur n’est pas approuvée.'
+                : hasMinimumWithdrawBalance
                 ? 'Choisissez Mobile Money, renseignez votre numero, puis soumettez la demande.'
                 : `Votre solde actuel est de ${balance.toFixed(2)} USD. Le retrait sera disponible a partir de ${MIN_WITHDRAW_AMOUNT} USD.`}
             </div>
@@ -467,7 +478,7 @@ export default function WalletPage() {
                 value={withdrawAmount}
                 onChange={(e) => setWithdrawAmount(e.target.value)}
                 placeholder="10"
-                disabled={!hasMinimumWithdrawBalance}
+                disabled={!hasMinimumWithdrawBalance || !kycApproved}
               />
               {withdrawAmountExceedsBalance && (
                 <p className="text-xs text-destructive">
@@ -494,6 +505,7 @@ export default function WalletPage() {
               onClick={handleWithdraw}
               disabled={
                 isWithdrawing ||
+                !kycApproved ||
                 !hasMinimumWithdrawBalance ||
                 withdrawAmountExceedsBalance ||
                 withdrawAmountBelowMinimum

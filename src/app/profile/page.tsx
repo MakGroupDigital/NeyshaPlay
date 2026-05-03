@@ -12,9 +12,10 @@ import { useFirestore } from '@/firebase/provider'
 import { collection, deleteDoc, doc, getDoc, getDocs, query, updateDoc, where, writeBatch } from 'firebase/firestore'
 import { updateProfile } from 'firebase/auth'
 import type { User, Video } from '@/lib/types'
-import { Settings, UserPlus, Users, Heart, X, Play, Pause, Volume2, VolumeX, Share2, Copy, QrCode, MoreVertical, Trash2, Edit, Camera, Loader2 } from 'lucide-react'
+import { Settings, UserPlus, Users, Heart, X, Play, Pause, Volume2, VolumeX, Share2, Copy, QrCode, MoreVertical, Trash2, Edit, Camera, Loader2, Eye } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { uploadImageToCloudinary } from '@/lib/cloudinary'
+import { CreatorKycCard } from '@/components/creator-kyc-card'
 
 const countriesByRegion = [
   {
@@ -192,6 +193,7 @@ export default function ProfilePage() {
   const [isSavingProfile, setIsSavingProfile] = useState(false)
   const [avatarUploadProgress, setAvatarUploadProgress] = useState(0)
   const [usernameEditedManually, setUsernameEditedManually] = useState(false)
+  const [avatarOpen, setAvatarOpen] = useState(false)
   const [showCreatorDialog, setShowCreatorDialog] = useState(false)
   const [acceptPolicy, setAcceptPolicy] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -745,10 +747,12 @@ export default function ProfilePage() {
           >
             <Settings className="h-5 w-5" />
           </button>
-          <Avatar className="h-32 w-32 border-4 border-primary">
-            <AvatarImage src={userData.avatarUrl} alt={userData.name} />
-            <AvatarFallback className="text-4xl">{userData.name.charAt(0)}</AvatarFallback>
-          </Avatar>
+          <button type="button" onClick={() => setAvatarOpen(true)} className="rounded-full">
+            <Avatar className="h-32 w-32 border-4 border-primary">
+              <AvatarImage src={userData.avatarUrl} alt={userData.name} />
+              <AvatarFallback className="text-4xl">{userData.name.charAt(0)}</AvatarFallback>
+            </Avatar>
+          </button>
           <div className="text-center">
             <h1 className="text-3xl font-bold font-headline">{userData.name}</h1>
             <p className="text-muted-foreground">{userData.username}</p>
@@ -790,6 +794,10 @@ export default function ProfilePage() {
             )
           })}
         </div>
+
+        {userData.role === 'creator' && (
+          <CreatorKycCard profile={userData} />
+        )}
 
         {userData.role === 'creator' && (
           <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-4">
@@ -847,7 +855,12 @@ export default function ProfilePage() {
         )}
 
         <div>
-          <h2 className="text-xl font-bold font-headline mb-4 text-center">Vidéos</h2>
+          <div className="mb-4 text-center">
+            <h2 className="text-xl font-bold font-headline">Vidéos</h2>
+            <p className="text-sm text-muted-foreground">
+              Total J'aime: <ClientFormattedNumber value={userData.likes || 0} />
+            </p>
+          </div>
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-1">
             {userVideos.map((video) => (
               <Card
@@ -862,6 +875,10 @@ export default function ProfilePage() {
                     className="object-cover"
                     data-ai-hint="user video"
                   />
+                  <div className="absolute bottom-1.5 left-1.5 inline-flex items-center gap-1 rounded-full bg-black/65 px-2 py-0.5 text-[11px] text-white">
+                    <Eye className="h-3 w-3" />
+                    <ClientFormattedNumber value={video.views || 0} />
+                  </div>
                 </div>
                 <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                   <DropdownMenu>
@@ -981,6 +998,14 @@ export default function ProfilePage() {
           </div>
         </div>
       )}
+
+      <Dialog open={avatarOpen} onOpenChange={setAvatarOpen}>
+        <DialogContent className="border-0 bg-black/95 p-0 shadow-none sm:max-w-2xl">
+          <div className="flex min-h-[70dvh] items-center justify-center p-6">
+            <img src={userData.avatarUrl} alt={userData.name} className="max-h-[80dvh] max-w-full rounded-2xl object-contain" />
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Dialog modification profil */}
       <Dialog open={showEditProfileDialog} onOpenChange={(open) => !open && setShowEditProfileDialog(false)}>

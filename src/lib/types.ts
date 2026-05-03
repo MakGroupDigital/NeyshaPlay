@@ -19,6 +19,7 @@ export type User = {
   country?: string
   city?: string
   birthDate?: string
+  kycStatus?: 'not_started' | 'draft' | 'pending' | 'approved' | 'rejected'
 }
 
 export type Wallet = {
@@ -67,6 +68,7 @@ export type Video = {
   likes: number
   comments: number
   shares: number
+  views?: number
   createdAt: Timestamp
   filter?: string
   isPaid?: boolean
@@ -78,11 +80,20 @@ export type Video = {
 
 export type Notification = {
   id: string
+  recipientId?: string
+  actorId?: string
+  actor?: Pick<User, 'name' | 'username' | 'avatarUrl'>
   user: Pick<User, 'name' | 'username' | 'avatarUrl'>
-  type: 'like' | 'follow' | 'comment'
+  type: 'like' | 'follow' | 'comment' | 'purchase'
   content: string
-  timestamp: string
-  read: boolean
+  read?: boolean
+  createdAt?: Timestamp
+  timestamp?: string
+  metadata?: {
+    videoId?: string
+    purchaseId?: string
+    amount?: number
+  }
 }
 
     
