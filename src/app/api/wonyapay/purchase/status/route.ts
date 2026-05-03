@@ -60,6 +60,11 @@ async function creditCreatorWallet(params: {
 
 export async function POST(request: Request) {
   try {
+    return NextResponse.json(
+      { error: 'Suivi WonyaPay desactive. Le portefeuille est la seule methode pour debloquer un contenu.' },
+      { status: 410 }
+    )
+
     const { purchaseId } = await request.json()
     if (!purchaseId) {
       return NextResponse.json({ error: 'purchaseId requis' }, { status: 400 })

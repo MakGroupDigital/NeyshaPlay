@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { MIN_WALLET_DEPOSIT_USD } from '@/lib/wallet-transactions'
 
 export const runtime = 'nodejs'
 
@@ -24,43 +25,33 @@ async function getAccessToken() {
     },
     body: 'grant_type=client_credentials',
   })
-  const raw = await response.text()
-  let data: any = null
-  try {
-    data = JSON.parse(raw)
-  } catch {
-    data = null
-  }
+  const data = await response.json()
   if (!response.ok || !data?.access_token) {
-    const detail = data?.error_description || data?.error || raw || 'Unknown error'
-    throw new Error(`PayPal auth failed: ${detail}`)
+    throw new Error(data?.error_description || data?.error || 'PayPal auth failed')
   }
   return data.access_token as string
 }
 
+function getOrigin(request: Request) {
+  const forwardedHost = request.headers.get('x-forwarded-host')
+  const host = forwardedHost || request.headers.get('host')
+  const proto = request.headers.get('x-forwarded-proto') || (host?.startsWith('localhost') ? 'http' : 'https')
+  return host ? `${proto}://${host}` : 'http://localhost:9002'
+}
+
 export async function POST(request: Request) {
   try {
-    return NextResponse.json(
-      { error: 'Achat PayPal direct desactive. Creditez le portefeuille puis debloquez le contenu.' },
-      { status: 410 }
-    )
-
-    const { amount, currency, videoId } = await request.json()
+    const { userId, amount } = await request.json()
     const numericAmount = Number(amount)
-    if (!videoId) {
-      return NextResponse.json({ error: 'Missing videoId' }, { status: 400 })
-    }
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-      return NextResponse.json({ error: 'Invalid amount' }, { status: 400 })
+    if (!userId || !Number.isFinite(numericAmount) || numericAmount < MIN_WALLET_DEPOSIT_USD) {
+      return NextResponse.json(
+        { error: `Le depot minimum est de ${MIN_WALLET_DEPOSIT_USD} USD.` },
+        { status: 400 }
+      )
     }
 
-    const forwardedHost = request.headers.get('x-forwarded-host')
-    const host = forwardedHost || request.headers.get('host')
-    const proto = request.headers.get('x-forwarded-proto') || 'https'
-    const origin = host ? `${proto}://${host}` : 'http://localhost:3000'
-    const returnUrl = `${origin}/paypal/return?videoId=${encodeURIComponent(videoId || '')}`
-    const cancelUrl = `${origin}/paypal/cancel?videoId=${encodeURIComponent(videoId || '')}`
-
+    const origin = getOrigin(request)
+    const params = new URLSearchParams({ userId, amount: numericAmount.toFixed(2) })
     const accessToken = await getAccessToken()
     const response = await fetch(`${PAYPAL_BASE}/v2/checkout/orders`, {
       method: 'POST',
@@ -73,14 +64,14 @@ export async function POST(request: Request) {
         purchase_units: [
           {
             amount: {
-              currency_code: currency || 'USD',
+              currency_code: 'USD',
               value: numericAmount.toFixed(2),
             },
           },
         ],
         application_context: {
-          return_url: returnUrl,
-          cancel_url: cancelUrl,
+          return_url: `${origin}/paypal/deposit/return?${params.toString()}`,
+          cancel_url: `${origin}/paypal/deposit/cancel`,
           user_action: 'PAY_NOW',
         },
       }),
@@ -92,11 +83,8 @@ export async function POST(request: Request) {
     }
 
     const approveUrl = data?.links?.find((link: any) => link.rel === 'approve')?.href
-    return NextResponse.json({
-      orderId: data.id,
-      approveUrl,
-    })
+    return NextResponse.json({ orderId: data.id, approveUrl, redirectUrl: approveUrl })
   } catch (error: any) {
-    return NextResponse.json({ error: error?.message || 'Server error' }, { status: 500 })
+    return NextResponse.json({ error: error?.message || 'Erreur depot PayPal' }, { status: 500 })
   }
 }

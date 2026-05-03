@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useFirestore } from '@/firebase/provider'
 import { useUser } from '@/firebase'
-import { collection, doc, getDoc, getDocs, limit, orderBy, query } from 'firebase/firestore'
+import { collection, doc, getDoc, limit, onSnapshot, orderBy, query } from 'firebase/firestore'
 import type { User } from '@/lib/types'
 
 function NeyshaIcon() {
@@ -72,17 +72,18 @@ export function TopCreators() {
   }, [preferredGender, userGender])
 
   useEffect(() => {
-    const fetchTopCreators = async () => {
-      if (!firestore) return
-      setLoading(true)
+    if (!firestore) return
+    setLoading(true)
 
-      try {
-        const usersQuery = query(
-          collection(firestore, 'users'),
-          orderBy('likes', 'desc'),
-          limit(50)
-        )
-        const usersSnapshot = await getDocs(usersQuery)
+    const usersQuery = query(
+      collection(firestore, 'users'),
+      orderBy('likes', 'desc'),
+      limit(50)
+    )
+
+    const unsubscribe = onSnapshot(
+      usersQuery,
+      (usersSnapshot) => {
         const users = usersSnapshot.docs.map((docSnap) => ({
           id: docSnap.id,
           ...docSnap.data(),
@@ -100,14 +101,15 @@ export function TopCreators() {
           const fallbackSorted = [...creators].sort((a, b) => (b.likes || 0) - (a.likes || 0))
           setTopCreators(fallbackSorted.slice(0, 5))
         }
-      } catch (error) {
-        console.error('Error fetching top creators:', error)
-      } finally {
+        setLoading(false)
+      },
+      (error) => {
+        console.error('Error listening top creators:', error)
         setLoading(false)
       }
-    }
+    )
 
-    fetchTopCreators()
+    return () => unsubscribe()
   }, [firestore, effectiveGender])
 
   const handleCreatorClick = (creatorId: string) => {

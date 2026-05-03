@@ -2,17 +2,31 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { collection, doc, getDoc, getDocs, limit, query, where } from 'firebase/firestore'
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  onSnapshot,
+  query,
+  where,
+} from 'firebase/firestore'
 import { Wallet as WalletIcon, ArrowDownToLine, ArrowUpRight, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { useFirestore, useUser } from '@/firebase'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { useDoc, useFirestore, useUser } from '@/firebase'
 import { ClientFormattedNumber } from '@/components/client-formatted-number'
-import type { Transaction, Wallet } from '@/lib/types'
+import type { Transaction, User, Wallet } from '@/lib/types'
 import { useToast } from '@/hooks/use-toast'
+
+const MIN_DEPOSIT_AMOUNT = 10
+const MIN_WITHDRAW_AMOUNT = 10
+type DepositMethod = 'maxicash' | 'paypal'
 
 type WalletState = {
   wallet: Wallet | null
@@ -35,6 +49,18 @@ export default function WalletPage() {
   const [withdrawAmount, setWithdrawAmount] = useState('')
   const [withdrawPhone, setWithdrawPhone] = useState('')
   const [isWithdrawing, setIsWithdrawing] = useState(false)
+  const [showDepositDialog, setShowDepositDialog] = useState(false)
+  const [depositAmount, setDepositAmount] = useState('')
+  const [depositPhone, setDepositPhone] = useState('')
+  const [depositMethod, setDepositMethod] = useState<DepositMethod>('maxicash')
+  const [isDepositing, setIsDepositing] = useState(false)
+
+  const userDocRef = useMemo(() => {
+    if (!firestore || !user) return null
+    return doc(firestore, 'users', user.uid)
+  }, [firestore, user])
+  const { data: profile } = useDoc<User>(userDocRef as any)
+  const isCreator = profile?.role === 'creator'
 
   useEffect(() => {
     if (!userLoading && !user) {
@@ -86,8 +112,71 @@ export default function WalletPage() {
   }, [firestore, user])
 
   useEffect(() => {
-    fetchWallet()
-  }, [fetchWallet])
+    if (!firestore || !user) return
+    setLoading(true)
+
+    const directRef = doc(firestore, 'wallets', user.uid)
+    let unsubscribeQuery: (() => void) | undefined
+
+    const unsubscribeDirect = onSnapshot(
+      directRef,
+      (directSnap) => {
+        if (directSnap.exists()) {
+          unsubscribeQuery?.()
+          unsubscribeQuery = undefined
+          const data = { id: directSnap.id, ...directSnap.data() } as Wallet
+          setWalletState({
+            wallet: data,
+            transactions: Array.isArray(data.transactions) ? data.transactions : [],
+          })
+          setLoading(false)
+          return
+        }
+
+        if (unsubscribeQuery) {
+          setLoading(false)
+          return
+        }
+
+        const walletsQuery = query(
+          collection(firestore, 'wallets'),
+          where('userId', '==', user.uid),
+          limit(1)
+        )
+        unsubscribeQuery = onSnapshot(
+          walletsQuery,
+          (walletsSnapshot) => {
+            if (!walletsSnapshot.empty) {
+              const docSnap = walletsSnapshot.docs[0]
+              const data = { id: docSnap.id, ...docSnap.data() } as Wallet
+              setWalletState({
+                wallet: data,
+                transactions: Array.isArray(data.transactions) ? data.transactions : [],
+              })
+            } else {
+              setWalletState(emptyState)
+            }
+            setLoading(false)
+          },
+          (error) => {
+            console.error('Error listening wallet query:', error)
+            setWalletState(emptyState)
+            setLoading(false)
+          }
+        )
+      },
+      (error) => {
+        console.error('Error listening wallet:', error)
+        setWalletState(emptyState)
+        setLoading(false)
+      }
+    )
+
+    return () => {
+      unsubscribeDirect()
+      unsubscribeQuery?.()
+    }
+  }, [firestore, user])
 
   const sortedTransactions = useMemo(
     () =>
@@ -100,14 +189,28 @@ export default function WalletPage() {
   )
 
   const balance = wallet?.balance ?? 0
+  const parsedWithdrawAmount = Number(withdrawAmount)
+  const hasMinimumWithdrawBalance = balance >= MIN_WITHDRAW_AMOUNT
+  const withdrawAmountExceedsBalance =
+    withdrawAmount.trim() !== '' && Number.isFinite(parsedWithdrawAmount) && parsedWithdrawAmount > balance
+  const withdrawAmountBelowMinimum =
+    withdrawAmount.trim() !== '' && Number.isFinite(parsedWithdrawAmount) && parsedWithdrawAmount < MIN_WITHDRAW_AMOUNT
 
   const handleWithdraw = useCallback(async () => {
     if (!user) return
     const amount = Number(withdrawAmount)
-    if (!Number.isFinite(amount) || amount <= 0) {
+    if (balance < MIN_WITHDRAW_AMOUNT) {
+      toast({
+        title: 'Solde insuffisant',
+        description: `Le retrait minimum est de ${MIN_WITHDRAW_AMOUNT} USD. Votre solde actuel est de ${balance.toFixed(2)} USD.`,
+        variant: 'destructive',
+      })
+      return
+    }
+    if (!Number.isFinite(amount) || amount < MIN_WITHDRAW_AMOUNT) {
       toast({
         title: 'Montant invalide',
-        description: 'Entrez un montant de retrait valide.',
+        description: `Entrez au moins ${MIN_WITHDRAW_AMOUNT} USD.`,
         variant: 'destructive',
       })
       return
@@ -131,55 +234,28 @@ export default function WalletPage() {
 
     setIsWithdrawing(true)
     try {
-      const response = await fetch('/api/wonyapay/withdraw/initiate', {
+      const response = await fetch('/api/wallet/withdraw-request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: user.uid,
           amount,
           phoneNumber: withdrawPhone.trim(),
+          method: 'mobile_money',
         }),
       })
       const data = await response.json()
       if (!response.ok) {
-        throw new Error(data?.error || 'Retrait WonyaPay impossible')
-      }
-
-      if (data?.transactionStatus === 'pending') {
-        toast({
-          title: 'Retrait initie',
-          description: 'Le retrait est en cours de confirmation chez l’operateur.',
-        })
-
-        for (let attempt = 0; attempt < 20; attempt += 1) {
-          await new Promise((resolve) => window.setTimeout(resolve, 4000))
-          const statusResponse = await fetch('/api/wonyapay/withdraw/status', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userId: user.uid,
-              transactionId: data.transactionId,
-            }),
-          })
-          const statusData = await statusResponse.json()
-          if (!statusResponse.ok) {
-            throw new Error(statusData?.error || 'Impossible de verifier le retrait')
-          }
-          if (statusData?.transactionStatus === 'completed') {
-            break
-          }
-          if (statusData?.transactionStatus === 'failed') {
-            throw new Error(statusData?.message || 'Retrait refuse ou annule')
-          }
-        }
+        throw new Error(data?.error || 'Demande de retrait impossible')
       }
 
       await fetchWallet()
       setShowWithdrawDialog(false)
       setWithdrawAmount('')
+      setWithdrawPhone('')
       toast({
-        title: 'Retrait traite',
-        description: 'Votre retrait WonyaPay a ete pris en compte.',
+        title: 'Demande soumise',
+        description: 'Votre demande de retrait Mobile Money est en attente de traitement.',
       })
     } catch (error: any) {
       toast({
@@ -191,6 +267,50 @@ export default function WalletPage() {
       setIsWithdrawing(false)
     }
   }, [balance, fetchWallet, toast, user, withdrawAmount, withdrawPhone])
+
+  const handleDeposit = useCallback(async () => {
+    if (!user) return
+    const amount = Number(depositAmount)
+    if (!Number.isFinite(amount) || amount < MIN_DEPOSIT_AMOUNT) {
+      toast({
+        title: 'Montant invalide',
+        description: `Le depot minimum est de ${MIN_DEPOSIT_AMOUNT} USD.`,
+        variant: 'destructive',
+      })
+      return
+    }
+
+    setIsDepositing(true)
+    try {
+      const endpoint =
+        depositMethod === 'paypal'
+          ? '/api/paypal/deposit/create-order'
+          : '/api/maxicash/deposit/initiate'
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.uid,
+          amount,
+          phoneNumber: depositPhone.trim(),
+          email: user.email || '',
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok || !data?.redirectUrl) {
+        throw new Error(data?.error || 'Depot Mobile Money impossible')
+      }
+
+      window.location.href = data.redirectUrl
+    } catch (error: any) {
+      toast({
+        title: 'Depot echoue',
+        description: error?.message || 'Veuillez reessayer.',
+        variant: 'destructive',
+      })
+      setIsDepositing(false)
+    }
+  }, [depositAmount, depositMethod, depositPhone, toast, user])
 
   if (userLoading || loading) {
     return (
@@ -210,7 +330,9 @@ export default function WalletPage() {
         <div>
           <h1 className="text-3xl font-bold font-headline">Portefeuille</h1>
           <p className="text-sm text-muted-foreground">
-            Gérez vos revenus et retraits en toute simplicité.
+            {isCreator
+              ? 'Gerez vos revenus, depots et retraits.'
+              : 'Creditez votre solde pour debloquer les contenus payants.'}
           </p>
         </div>
         <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
@@ -266,11 +388,13 @@ export default function WalletPage() {
       </Card>
 
       <div className="flex flex-wrap gap-3">
-        <Button size="lg" className="gap-2" onClick={() => setShowWithdrawDialog(true)}>
-          <ArrowUpRight className="h-4 w-4" />
-          Retirer
-        </Button>
-        <Button size="lg" variant="secondary" className="gap-2">
+        {isCreator && (
+          <Button size="lg" className="gap-2" onClick={() => setShowWithdrawDialog(true)}>
+            <ArrowUpRight className="h-4 w-4" />
+            Retirer
+          </Button>
+        )}
+        <Button size="lg" variant="secondary" className="gap-2" onClick={() => setShowDepositDialog(true)}>
           <ArrowDownToLine className="h-4 w-4" />
           Ajouter
         </Button>
@@ -281,7 +405,7 @@ export default function WalletPage() {
           <CardTitle className="text-lg">Transactions récentes</CardTitle>
         </CardHeader>
         <CardContent>
-          {transactions.length === 0 ? (
+          {sortedTransactions.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-secondary text-primary">
                 <Sparkles className="h-5 w-5" />
@@ -290,12 +414,12 @@ export default function WalletPage() {
                 Aucune transaction pour le moment.
               </p>
               <p className="text-xs text-muted-foreground">
-                Vos revenus apparaîtront ici dès vos premières ventes.
+                Vos mouvements de portefeuille apparaitront ici.
               </p>
             </div>
           ) : (
             <div className="space-y-3">
-              {sortedTransactions.slice(0, 6).map((transaction) => (
+              {sortedTransactions.slice(0, 10).map((transaction) => (
                 <div
                   key={transaction.id}
                   className="flex items-center justify-between rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3"
@@ -321,23 +445,40 @@ export default function WalletPage() {
       <Dialog open={showWithdrawDialog} onOpenChange={setShowWithdrawDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Retirer avec WonyaPay</DialogTitle>
+            <DialogTitle>Demande de retrait</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="rounded-xl border border-primary/15 bg-primary/5 p-3 text-sm text-muted-foreground">
-              Le retrait sera envoye via WonyaPay Mobile Money en USD.
+              {hasMinimumWithdrawBalance
+                ? 'Choisissez Mobile Money, renseignez votre numero, puis soumettez la demande.'
+                : `Votre solde actuel est de ${balance.toFixed(2)} USD. Le retrait sera disponible a partir de ${MIN_WITHDRAW_AMOUNT} USD.`}
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+              <p className="text-sm font-medium">Mobile Money</p>
+              <p className="text-xs text-muted-foreground">M-Pesa, Airtel Money, Orange Money, Afrimoney</p>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="withdraw-amount">Montant (USD)</Label>
               <Input
                 id="withdraw-amount"
                 type="number"
-                min="0"
+                min={MIN_WITHDRAW_AMOUNT}
                 step="0.01"
                 value={withdrawAmount}
                 onChange={(e) => setWithdrawAmount(e.target.value)}
                 placeholder="10"
+                disabled={!hasMinimumWithdrawBalance}
               />
+              {withdrawAmountExceedsBalance && (
+                <p className="text-xs text-destructive">
+                  Le montant depasse votre solde disponible de {balance.toFixed(2)} USD.
+                </p>
+              )}
+              {withdrawAmountBelowMinimum && (
+                <p className="text-xs text-destructive">
+                  Le retrait minimum est de {MIN_WITHDRAW_AMOUNT} USD.
+                </p>
+              )}
             </div>
             <div className="grid gap-2">
               <Label htmlFor="withdraw-phone">Numero Mobile Money</Label>
@@ -348,8 +489,78 @@ export default function WalletPage() {
                 placeholder="0997654321"
               />
             </div>
-            <Button className="w-full" onClick={handleWithdraw} disabled={isWithdrawing}>
-              {isWithdrawing ? 'Traitement...' : 'Confirmer le retrait'}
+            <Button
+              className="w-full"
+              onClick={handleWithdraw}
+              disabled={
+                isWithdrawing ||
+                !hasMinimumWithdrawBalance ||
+                withdrawAmountExceedsBalance ||
+                withdrawAmountBelowMinimum
+              }
+            >
+              {isWithdrawing ? 'Soumission...' : 'Soumettre la demande'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showDepositDialog} onOpenChange={setShowDepositDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Ajouter des fonds</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-xl border border-primary/15 bg-primary/5 p-3 text-sm text-muted-foreground">
+              Depot minimum: {MIN_DEPOSIT_AMOUNT} USD. Votre solde sera credite apres validation du paiement.
+            </div>
+            <RadioGroup
+              className="space-y-3"
+              value={depositMethod}
+              onValueChange={(value) => setDepositMethod(value as DepositMethod)}
+            >
+              <label className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium">Depot par Mobile Money</p>
+                  <p className="text-xs text-muted-foreground">M-Pesa, Airtel Money, Orange Money, Afrimoney</p>
+                </div>
+                <RadioGroupItem value="maxicash" />
+              </label>
+              <label className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium">PayPal</p>
+                  <p className="text-xs text-muted-foreground">Carte bancaire, Apple Pay ou compte PayPal</p>
+                </div>
+                <RadioGroupItem value="paypal" />
+              </label>
+            </RadioGroup>
+            <div className="grid gap-2">
+              <Label htmlFor="deposit-amount">Montant (USD)</Label>
+              <Input
+                id="deposit-amount"
+                type="number"
+                min={MIN_DEPOSIT_AMOUNT}
+                step="0.01"
+                value={depositAmount}
+                onChange={(e) => setDepositAmount(e.target.value)}
+                placeholder={String(MIN_DEPOSIT_AMOUNT)}
+              />
+            </div>
+            {depositMethod === 'maxicash' && (
+              <div className="grid gap-2">
+                <Label htmlFor="deposit-phone">Numero Mobile Money</Label>
+                <Input
+                  id="deposit-phone"
+                  value={depositPhone}
+                  onChange={(e) => setDepositPhone(e.target.value)}
+                  placeholder="+243..."
+                />
+              </div>
+            )}
+            <Button className="w-full" onClick={handleDeposit} disabled={isDepositing}>
+              {isDepositing
+                ? 'Redirection...'
+                : `Continuer avec ${depositMethod === 'paypal' ? 'PayPal' : 'Mobile Money'}`}
             </Button>
           </div>
         </DialogContent>

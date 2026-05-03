@@ -73,6 +73,11 @@ async function creditCreatorWallet(params: {
 
 export async function POST(request: Request) {
   try {
+    return NextResponse.json(
+      { error: 'Achat WonyaPay desactive. Le portefeuille est la seule methode pour debloquer un contenu.' },
+      { status: 410 }
+    )
+
     const { userId, videoId, phoneNumber } = await request.json()
     if (!userId || !videoId || !phoneNumber) {
       return NextResponse.json({ error: 'userId, videoId et phoneNumber sont requis' }, { status: 400 })

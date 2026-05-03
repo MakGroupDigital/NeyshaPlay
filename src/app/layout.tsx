@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import { Toaster } from '@/components/ui/toaster'
 import { AppGate } from '@/components/app-gate'
-import { PendingPurchaseWatcher } from '@/components/purchase/pending-purchase-watcher'
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -104,7 +103,6 @@ export default function RootLayout({
       </head>
       <body className="font-body antialiased min-h-[100dvh] bg-background text-foreground">
         <AppGate>{children}</AppGate>
-        <PendingPurchaseWatcher />
         <Toaster />
       </body>
     </html>

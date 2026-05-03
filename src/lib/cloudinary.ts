@@ -5,6 +5,7 @@ export const cloudinaryConfig = {
   apiKey: process.env.NEXT_PUBLIC_CLOUDINARY_API_KEY || '828292343673526',
   apiSecret: process.env.CLOUDINARY_API_SECRET,
   uploadPreset: process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || 'neyshaplay_videos',
+  imageUploadPreset: process.env.NEXT_PUBLIC_CLOUDINARY_IMAGE_UPLOAD_PRESET,
   url: process.env.CLOUDINARY_URL,
 };
 
@@ -46,7 +47,14 @@ export async function uploadVideoToCloudinary(
         const response = JSON.parse(xhr.responseText);
         resolve(response);
       } else {
-        reject(new Error(`Upload failed with status ${xhr.status}`));
+        let message = `Upload failed with status ${xhr.status}`;
+        try {
+          const response = JSON.parse(xhr.responseText);
+          message = response?.error?.message || message;
+        } catch {
+          // ignore
+        }
+        reject(new Error(message));
       }
     });
     
@@ -55,6 +63,84 @@ export async function uploadVideoToCloudinary(
     });
     
     xhr.open('POST', `https://api.cloudinary.com/v1_1/${cloudinaryConfig.cloudName}/upload`);
+    xhr.send(formData);
+  });
+}
+
+/**
+ * Upload image to Cloudinary.
+ */
+export async function uploadImageToCloudinary(
+  file: Blob,
+  onProgress?: (progress: number) => void
+): Promise<CloudinaryUploadResponse> {
+  if (!cloudinaryConfig.cloudName) {
+    throw new Error('Configuration Cloudinary image incomplete');
+  }
+
+  const formData = new FormData();
+  formData.append('file', file, 'profile-avatar.png');
+
+  let uploadCloudName = cloudinaryConfig.cloudName;
+  try {
+    const signatureResponse = await fetch('/api/cloudinary/sign-image-upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    if (signatureResponse.ok) {
+      const signedUpload = await signatureResponse.json();
+      uploadCloudName = signedUpload.cloudName || uploadCloudName;
+      formData.append('api_key', signedUpload.apiKey);
+      formData.append('timestamp', String(signedUpload.timestamp));
+      formData.append('signature', signedUpload.signature);
+      formData.append('folder', signedUpload.folder);
+    } else if (cloudinaryConfig.imageUploadPreset) {
+      formData.append('upload_preset', cloudinaryConfig.imageUploadPreset);
+    } else {
+      const response = await signatureResponse.json().catch(() => null);
+      throw new Error(
+        response?.error ||
+          'Configurez CLOUDINARY_API_SECRET ou NEXT_PUBLIC_CLOUDINARY_IMAGE_UPLOAD_PRESET pour les photos.'
+      );
+    }
+  } catch (error: any) {
+    if (cloudinaryConfig.imageUploadPreset && formData.get('upload_preset') !== cloudinaryConfig.imageUploadPreset) {
+      formData.append('upload_preset', cloudinaryConfig.imageUploadPreset);
+    } else {
+      throw error;
+    }
+  }
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable && onProgress) {
+        onProgress((e.loaded / e.total) * 100);
+      }
+    });
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status === 200) {
+        resolve(JSON.parse(xhr.responseText));
+      } else {
+        let message = `Upload failed with status ${xhr.status}`;
+        try {
+          const response = JSON.parse(xhr.responseText);
+          message = response?.error?.message || message;
+        } catch {
+          // ignore
+        }
+        reject(new Error(message));
+      }
+    });
+
+    xhr.addEventListener('error', () => {
+      reject(new Error('Upload failed'));
+    });
+
+    xhr.open('POST', `https://api.cloudinary.com/v1_1/${uploadCloudName}/image/upload`);
     xhr.send(formData);
   });
 }

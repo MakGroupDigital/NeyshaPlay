@@ -14,13 +14,23 @@ export function GenderGate({ children }: { children: React.ReactNode }) {
   const { toast } = useToast()
   const [saving, setSaving] = useState(false)
   const [selected, setSelected] = useState<'female' | 'male' | ''>('')
+  const [savedLocally, setSavedLocally] = useState(false)
 
   const userRef = useMemo(() => {
     if (!firestore || !user) return null
     return doc(firestore, 'users', user.uid)
   }, [firestore, user])
 
-  const { data: profile, loading: profileLoading } = useDoc<User>(userRef)
+  const { data: profile, loading: profileLoading } = useDoc<User>(userRef as any)
+
+  useEffect(() => {
+    if (!user) return
+    try {
+      setSavedLocally(localStorage.getItem(`genderSaved:${user.uid}`) === 'true')
+    } catch {
+      setSavedLocally(false)
+    }
+  }, [user])
 
   useEffect(() => {
     if (profile?.gender && selected === '') {
@@ -36,7 +46,7 @@ export function GenderGate({ children }: { children: React.ReactNode }) {
     )
   }
 
-  if (!user || (profile && profile.gender)) {
+  if (!user || savedLocally || (profile && profile.gender)) {
     return <>{children}</>
   }
 
@@ -60,6 +70,14 @@ export function GenderGate({ children }: { children: React.ReactNode }) {
         },
         { merge: true }
       )
+      try {
+        localStorage.setItem(`genderSaved:${user.uid}`, 'true')
+        localStorage.setItem('feedGender', profile?.feedGender ?? selected)
+        localStorage.setItem('feedGenderChosen', 'true')
+      } catch {
+        // ignore
+      }
+      setSavedLocally(true)
       toast({ title: 'Sexe enregistré' })
     } catch (error) {
       console.error('Failed to save gender:', error)

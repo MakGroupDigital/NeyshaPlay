@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { useToast } from '@/hooks/use-toast'
-import { X, Music, RefreshCw, Zap, Sparkles, Timer, Flashlight, Wand2, Send, RotateCcw, ArrowRight, Loader2 } from 'lucide-react'
+import { X, Music, RefreshCw, Zap, Sparkles, Timer, Flashlight, Wand2, Send, RotateCcw, ArrowRight, Loader2, Upload } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Slider } from '@/components/ui/slider'
 import { Progress } from '@/components/ui/progress'
@@ -72,6 +72,7 @@ export default function CreatePage() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const videoImportInputRef = useRef<HTMLInputElement>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const toastRef = useRef(toast)
   const soundSourceRef = useRef<MediaElementAudioSourceNode | null>(null)
@@ -90,9 +91,11 @@ export default function CreatePage() {
     if (!firestore || !user) return null
     return doc(firestore, 'users', user.uid)
   }, [firestore, user])
-  const { data: profile } = useDoc<User>(userProfileRef)
+  const { data: profile } = useDoc<User>(userProfileRef as any)
 
   const [hasCameraPermission, setHasCameraPermission] = useState(true)
+  const [cameraRequested, setCameraRequested] = useState(false)
+  const [isImportingVideo, setIsImportingVideo] = useState(false)
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([])
   const [activeCameraIndex, setActiveCameraIndex] = useState(0)
   const [stream, setStream] = useState<MediaStream | null>(null)
@@ -679,6 +682,7 @@ export default function CreatePage() {
 
   const getCameraPermission = useCallback(async () => {
       try {
+        setCameraRequested(true)
         if (stream) {
           stream.getTracks().forEach(track => track.stop())
         }
@@ -775,10 +779,50 @@ export default function CreatePage() {
       }
   }, [activeCameraIndex, cameras, frontCameraIndex, recordQuality, stream, toast])
 
+  const handleImportVideo = useCallback(
+    async (file: File) => {
+      if (!file) return
+      if (!file.type.startsWith('video/')) {
+        toast({
+          title: 'Fichier invalide',
+          description: 'Choisissez une video depuis votre appareil.',
+          variant: 'destructive',
+        })
+        return
+      }
+
+      setIsImportingVideo(true)
+      try {
+        if (stream) {
+          stream.getTracks().forEach((track) => track.stop())
+          setStream(null)
+        }
+        if (recordedVideoUrl?.startsWith('blob:')) {
+          URL.revokeObjectURL(recordedVideoUrl)
+        }
+
+        const url = URL.createObjectURL(file)
+        setRecordedBlob(file)
+        setRecordedMimeType(file.type || 'video/mp4')
+        setRecordedVideoUrl(url)
+        setRecordedFilter('none')
+        setRecordingProgress(0)
+        setIsRecording(false)
+        setStep('preview')
+        toast({
+          title: 'Video importee',
+          description: 'Vous pouvez la previsualiser puis continuer.',
+        })
+      } finally {
+        setIsImportingVideo(false)
+      }
+    },
+    [recordedVideoUrl, stream, toast]
+  )
+
   useEffect(() => {
     const enumerateDevices = async () => {
         try {
-            await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
             const devices = await navigator.mediaDevices.enumerateDevices()
             const videoDevices = devices.filter(device => device.kind === 'videoinput')
             setCameras(videoDevices)
@@ -802,7 +846,7 @@ export default function CreatePage() {
   }, [])
   
   useEffect(() => {
-    if (step === 'recording') {
+    if (step === 'recording' && cameraRequested) {
       getCameraPermission()
     }
 
@@ -814,7 +858,7 @@ export default function CreatePage() {
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCameraIndex, recordQuality, step])
+  }, [activeCameraIndex, cameraRequested, recordQuality, step])
 
   useEffect(() => {
     const video = videoRef.current
@@ -882,9 +926,10 @@ export default function CreatePage() {
 
         const mixedAudioTrack = mixedStreamRef.current?.getAudioTracks()?.[0]
         const micTrack = stream.getAudioTracks()?.[0]
+        const audioElement = audioRef.current as (HTMLAudioElement & { captureStream?: () => MediaStream }) | null
         const audioFromElement =
-          audioRef.current && typeof audioRef.current.captureStream === 'function'
-            ? audioRef.current.captureStream().getAudioTracks()?.[0]
+          audioElement && typeof audioElement.captureStream === 'function'
+            ? audioElement.captureStream().getAudioTracks()?.[0]
             : undefined
 
         const preferSound = Boolean(selectedSoundUrl)
@@ -946,6 +991,8 @@ export default function CreatePage() {
   const handleRecordButtonClick = () => {
       if (isRecording) {
           handleStopRecording()
+      } else if (!cameraRequested || !stream) {
+          getCameraPermission()
       } else {
           handleStartRecording()
       }
@@ -1254,11 +1301,37 @@ export default function CreatePage() {
       </Button>
 
       {step === 'recording' && (
-        <div className="absolute top-[calc(1rem+env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-20">
+        <div className="absolute top-[calc(1rem+env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-20 flex items-center gap-2">
           <Button variant="secondary" className="bg-black/50 hover:bg-black/70 rounded-full text-sm text-white" onClick={() => handleOptionClick('sound')}>
               <Music className="mr-2 h-4 w-4 text-primary" />
               Ajouter un son
           </Button>
+          <Button
+            variant="secondary"
+            className="bg-black/50 hover:bg-black/70 rounded-full text-sm text-white"
+            onClick={() => videoImportInputRef.current?.click()}
+            disabled={isRecording || isImportingVideo}
+          >
+            {isImportingVideo ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin text-primary" />
+            ) : (
+              <Upload className="mr-2 h-4 w-4 text-primary" />
+            )}
+            Importer
+          </Button>
+          <input
+            ref={videoImportInputRef}
+            type="file"
+            accept="video/*"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              if (file) {
+                handleImportVideo(file)
+              }
+              event.currentTarget.value = ''
+            }}
+          />
         </div>
       )}
 
@@ -1553,12 +1626,32 @@ export default function CreatePage() {
           muted
           playsInline
         />
-        {!hasCameraPermission && (
+        {!cameraRequested && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black p-6 text-center">
+            <div className="max-w-sm space-y-4">
+              <div>
+                <h2 className="text-xl font-semibold text-white">Creer une video</h2>
+                <p className="mt-2 text-sm text-white/70">
+                  Enregistrez avec la camera ou importez une video depuis votre appareil.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-3">
+                <Button size="lg" onClick={getCameraPermission}>
+                  Autoriser la camera
+                </Button>
+                <Button size="lg" variant="secondary" onClick={() => videoImportInputRef.current?.click()}>
+                  Importer une video
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+        {cameraRequested && !hasCameraPermission && (
           <div className="absolute inset-0 flex items-center justify-center p-4 bg-black">
             <Alert variant="destructive" className="max-w-sm">
                 <AlertTitle>Accès à la caméra requis</AlertTitle>
                 <AlertDescription>
-                Veuillez autoriser l'accès à la caméra.
+                Autorisez la camera dans les parametres du navigateur ou importez une video depuis votre appareil.
                 </AlertDescription>
             </Alert>
           </div>
@@ -1597,10 +1690,12 @@ export default function CreatePage() {
                   "w-20 h-20 rounded-full border-4 border-white/50 transition-all duration-200 flex items-center justify-center",
                   isRecording ? "bg-white/70" : "bg-primary/70 hover:bg-primary"
                 )}
-                disabled={!hasCameraPermission}
+                disabled={cameraRequested && !hasCameraPermission}
               >
                 {isRecording && <div className="w-8 h-8 rounded-md bg-primary" />}
-                <span className="sr-only">{isRecording ? "Arrêter" : "Enregistrer"}</span>
+                <span className="sr-only">
+                  {isRecording ? "Arrêter" : cameraRequested ? "Enregistrer" : "Autoriser la camera"}
+                </span>
               </button>
               <span className="text-white text-sm font-semibold">Vidéo</span>
           </div>

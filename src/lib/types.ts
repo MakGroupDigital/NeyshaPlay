@@ -16,6 +16,9 @@ export type User = {
   createdAt: Timestamp
   gender?: 'female' | 'male'
   feedGender?: 'female' | 'male' | 'all'
+  country?: string
+  city?: string
+  birthDate?: string
 }
 
 export type Wallet = {
@@ -41,10 +44,15 @@ export type Transaction = {
     videoId?: string
     orderId?: string
     withdrawalMethod?: string
+    depositMethod?: string
     providerReference?: string
+    providerLogId?: string
     phoneNumber?: string
+    email?: string
     refunded?: boolean
     providerStatus?: string
+    providerPayload?: Record<string, any> | null
+    withdrawalRequestId?: string
   }
 }
 

@@ -10,13 +10,10 @@ import {
   getDoc,
   setDoc,
   updateDoc,
-  increment,
   orderBy,
   limit,
   startAfter,
   where,
-  addDoc,
-  serverTimestamp,
   type DocumentData,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
@@ -28,33 +25,162 @@ import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 
-type PendingItem = { purchaseId: string; videoId?: string }
-const PENDING_KEY = 'pendingPurchases'
+const DEFAULT_PAGE_SIZE = 6;
+const FEED_SIGNAL_VERSION = 1;
 
-const readPending = (): PendingItem[] => {
-  if (typeof window === 'undefined') return []
+type FeedSignals = {
+  version: number
+  seenVideoIds: Record<string, number>
+  creatorViews: Record<string, number>
+  likedVideoIds: Record<string, number>
+  likedCreators: Record<string, number>
+}
+
+const emptyFeedSignals = (): FeedSignals => ({
+  version: FEED_SIGNAL_VERSION,
+  seenVideoIds: {},
+  creatorViews: {},
+  likedVideoIds: {},
+  likedCreators: {},
+})
+
+function getFeedSignalKey(userId?: string | null) {
+  return `neyshaFeedSignals:${userId || 'guest'}`
+}
+
+function readFeedSignals(userId?: string | null): FeedSignals {
+  if (typeof window === 'undefined') return emptyFeedSignals()
   try {
-    const raw = localStorage.getItem(PENDING_KEY)
-    if (!raw) return []
+    const raw = localStorage.getItem(getFeedSignalKey(userId))
+    if (!raw) return emptyFeedSignals()
     const parsed = JSON.parse(raw)
-    if (Array.isArray(parsed)) return parsed.filter((p) => p?.purchaseId)
-    return []
+    if (parsed?.version !== FEED_SIGNAL_VERSION) return emptyFeedSignals()
+    return {
+      ...emptyFeedSignals(),
+      ...parsed,
+      seenVideoIds: parsed.seenVideoIds || {},
+      creatorViews: parsed.creatorViews || {},
+      likedVideoIds: parsed.likedVideoIds || {},
+      likedCreators: parsed.likedCreators || {},
+    }
   } catch {
-    return []
+    return emptyFeedSignals()
   }
 }
 
-const writePending = (list: PendingItem[]) => {
+function writeFeedSignals(userId: string | null | undefined, signals: FeedSignals) {
   if (typeof window === 'undefined') return
-  localStorage.setItem(PENDING_KEY, JSON.stringify(list))
+  try {
+    const trimEntries = (entries: Record<string, number>) =>
+      Object.fromEntries(
+        Object.entries(entries)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 300)
+      )
+    localStorage.setItem(
+      getFeedSignalKey(userId),
+      JSON.stringify({
+        ...signals,
+        seenVideoIds: trimEntries(signals.seenVideoIds),
+        creatorViews: trimEntries(signals.creatorViews),
+        likedVideoIds: trimEntries(signals.likedVideoIds),
+        likedCreators: trimEntries(signals.likedCreators),
+      })
+    )
+  } catch {
+    // ignore
+  }
 }
 
-const notifyPendingUpdate = () => {
-  if (typeof window === 'undefined') return
-  window.dispatchEvent(new CustomEvent('pending-purchase-added'))
+function timestampToMillis(value: any) {
+  if (typeof value?.toDate === 'function') return value.toDate().getTime()
+  const parsed = new Date(value || 0).getTime()
+  return Number.isFinite(parsed) ? parsed : 0
 }
 
-const DEFAULT_PAGE_SIZE = 6;
+function getCreatorId(video: Video) {
+  return (video.userRef as any)?.id ?? video.user?.id ?? 'unknown'
+}
+
+function rankVideosForNeyshaFeed(
+  input: Video[],
+  options: {
+    userId?: string | null
+    feedGender?: 'female' | 'male' | 'all' | null
+    pageSize: number
+    existingVideos?: Video[]
+  }
+) {
+  const signals = readFeedSignals(options.userId)
+  const now = Date.now()
+  const existingIds = new Set((options.existingVideos || []).map((video) => video.id))
+  const existingCreatorCounts = new Map<string, number>()
+  ;(options.existingVideos || []).forEach((video) => {
+    const creatorId = getCreatorId(video)
+    existingCreatorCounts.set(creatorId, (existingCreatorCounts.get(creatorId) || 0) + 1)
+  })
+
+  const ranked = input
+    .filter((video) => !existingIds.has(video.id))
+    .map((video) => {
+      const creatorId = getCreatorId(video)
+      const createdAt = timestampToMillis(video.createdAt)
+      const ageHours = Math.max(0, (now - createdAt) / 36e5)
+      const recencyScore = Math.exp(-ageHours / 36) * 30
+      const engagementScore =
+        Math.log1p(Number(video.likes || 0)) * 5 +
+        Math.log1p(Number(video.comments || 0)) * 7 +
+        Math.log1p(Number(video.shares || 0)) * 8
+      const creatorAffinity =
+        Math.log1p(signals.creatorViews[creatorId] || 0) * 4 +
+        Math.log1p(signals.likedCreators[creatorId] || 0) * 10
+      const genderScore =
+        options.feedGender && options.feedGender !== 'all'
+          ? (video.creatorGender ?? video.user.gender) === options.feedGender
+            ? 18
+            : -100
+          : 0
+      const paidDiscovery = Number(video.price || 0) > 0 ? 2 : 0
+      const seenPenalty = signals.seenVideoIds[video.id] ? 32 : 0
+      const creatorRepeatPenalty = (existingCreatorCounts.get(creatorId) || 0) * 12
+      const exploration = Math.random() * 16
+
+      return {
+        video,
+        score:
+          recencyScore +
+          engagementScore +
+          creatorAffinity +
+          genderScore +
+          paidDiscovery +
+          exploration -
+          seenPenalty -
+          creatorRepeatPenalty,
+      }
+    })
+    .sort((a, b) => b.score - a.score)
+
+  const selected: Video[] = []
+  const selectedCreatorCounts = new Map(existingCreatorCounts)
+  for (const item of ranked) {
+    const creatorId = getCreatorId(item.video)
+    const count = selectedCreatorCounts.get(creatorId) || 0
+    if (selected.length < Math.max(2, options.pageSize - 1) && count >= 2) continue
+    selected.push(item.video)
+    selectedCreatorCounts.set(creatorId, count + 1)
+    if (selected.length >= options.pageSize) break
+  }
+
+  if (selected.length < options.pageSize) {
+    for (const item of ranked) {
+      if (selected.some((video) => video.id === item.video.id)) continue
+      selected.push(item.video)
+      if (selected.length >= options.pageSize) break
+    }
+  }
+
+  return selected
+}
 
 function resolvePageSize() {
   if (typeof navigator === 'undefined') return DEFAULT_PAGE_SIZE;
@@ -111,6 +237,7 @@ export default function Home() {
   const [unlockedMap, setUnlockedMap] = useState<Record<string, boolean>>({});
   const [pendingStatus, setPendingStatus] = useState<Record<string, 'pending' | 'failed' | 'completed'>>({});
   const [feedGender, setFeedGender] = useState<'female' | 'male' | 'all' | null>(null);
+  const [showFeedGenderTabs, setShowFeedGenderTabs] = useState(false);
   const [globalMuted, setGlobalMuted] = useState(true); // État global du son
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const userCache = useRef<Map<string, User>>(new Map());
@@ -121,7 +248,7 @@ export default function Home() {
     return doc(firestore, 'users', authUser.uid);
   }, [firestore, authUser]);
 
-  const { data: profile } = useDoc<User>(userDocRef);
+  const { data: profile } = useDoc<User>(userDocRef as any);
 
   useEffect(() => {
     const updatePageSize = () => setPageSize(resolvePageSize());
@@ -138,9 +265,11 @@ export default function Home() {
     if (typeof window === 'undefined') return;
     try {
       const stored = localStorage.getItem('feedGender');
+      const choiceSaved = localStorage.getItem('feedGenderChosen') === 'true';
       if (stored === 'female' || stored === 'male' || stored === 'all') {
         setFeedGender(stored);
       }
+      setShowFeedGenderTabs(!choiceSaved && !(stored === 'female' || stored === 'male' || stored === 'all'));
     } catch {
       // ignore
     }
@@ -151,37 +280,15 @@ export default function Home() {
     const next = profile?.feedGender || profile?.gender;
     if (next === 'female' || next === 'male' || next === 'all') {
       setFeedGender(next);
+      setShowFeedGenderTabs(false);
       try {
         localStorage.setItem('feedGender', next);
+        localStorage.setItem('feedGenderChosen', 'true');
       } catch {
         // ignore
       }
     }
   }, [feedGender, profile?.feedGender, profile?.gender]);
-
-  // Écoute globale des statuts d'achat (watcher)
-  useEffect(() => {
-    const handler = (event: any) => {
-      const detail = event?.detail as { videoId?: string; status?: string } | undefined
-      if (!detail?.videoId) return
-      if (detail.status === 'completed') {
-        setUnlockedMap((prev) => ({ ...prev, [detail.videoId!]: true }))
-        setPendingStatus((prev) => ({ ...prev, [detail.videoId!]: 'completed' }))
-        toast({ title: 'Accès débloqué', description: 'Vous pouvez maintenant regarder ce contenu.' })
-      } else if (detail.status === 'failed') {
-        setPendingStatus((prev) => ({ ...prev, [detail.videoId!]: 'failed' }))
-        setUnlockedMap((prev) => ({ ...prev, [detail.videoId!]: false }))
-        toast({
-          title: 'Paiement non abouti',
-          description: 'Vous pouvez réessayer plus tard.',
-          variant: 'destructive',
-        })
-      }
-    }
-
-    window.addEventListener('purchase-status', handler)
-    return () => window.removeEventListener('purchase-status', handler)
-  }, [toast])
 
   const fallbackUser = useMemo(
     () =>
@@ -197,7 +304,7 @@ export default function Home() {
         role: 'user',
         email: '',
         createdAt: null,
-      }) as User,
+      }) as unknown as User,
     []
   );
 
@@ -211,7 +318,7 @@ export default function Home() {
       try {
         const userDoc = await getDoc(userRef);
         if (userDoc.exists()) {
-          const userData = { id: userDoc.id, ...userDoc.data() } as User;
+          const userData = { id: userDoc.id, ...(userDoc.data() as Record<string, any>) } as User;
           userCache.current.set(cacheKey, userData);
           return userData;
         }
@@ -229,9 +336,11 @@ export default function Home() {
       setFeedGender(value);
       try {
         localStorage.setItem('feedGender', value);
+        localStorage.setItem('feedGenderChosen', 'true');
       } catch {
         // ignore
       }
+      setShowFeedGenderTabs(false);
 
       if (firestore && authUser) {
         try {
@@ -293,7 +402,12 @@ export default function Home() {
             (video) => (video.creatorGender ?? video.user.gender) === feedGender
           )
         : newVideos;
-      setVideos(filteredVideos.slice(0, pageSize));
+      const rankedVideos = rankVideosForNeyshaFeed(filteredVideos, {
+        userId: authUser?.uid,
+        feedGender,
+        pageSize,
+      })
+      setVideos(rankedVideos);
       setUnlockedMap({});
       setLastDoc(querySnapshot.docs[querySnapshot.docs.length - 1] ?? null);
       setHasMore(querySnapshot.docs.length === fetchLimit);
@@ -302,7 +416,7 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, [firestore, pageSize, buildVideos, feedGender]);
+  }, [authUser?.uid, firestore, pageSize, buildVideos, feedGender]);
 
   const loadMore = useCallback(async () => {
     if (!firestore || loadingMore || !hasMore || !lastDoc) return;
@@ -324,7 +438,15 @@ export default function Home() {
             (video) => (video.creatorGender ?? video.user.gender) === feedGender
           )
         : newVideos;
-      setVideos((prev) => [...prev, ...filteredVideos.slice(0, pageSize)]);
+      setVideos((prev) => [
+        ...prev,
+        ...rankVideosForNeyshaFeed(filteredVideos, {
+          userId: authUser?.uid,
+          feedGender,
+          pageSize,
+          existingVideos: prev,
+        }),
+      ]);
       setLastDoc(querySnapshot.docs[querySnapshot.docs.length - 1] ?? lastDoc);
       setHasMore(querySnapshot.docs.length === fetchLimit);
     } catch (error) {
@@ -332,7 +454,7 @@ export default function Home() {
     } finally {
       setLoadingMore(false);
     }
-  }, [firestore, loadingMore, hasMore, lastDoc, pageSize, buildVideos, feedGender]);
+  }, [authUser?.uid, firestore, loadingMore, hasMore, lastDoc, pageSize, buildVideos, feedGender]);
 
   useEffect(() => {
     if (!firestore) return;
@@ -410,132 +532,42 @@ export default function Home() {
   }, [firestore, videos]);
 
   const handlePay = useCallback(
-    async (
-      video: Video,
-      method: 'mobile-money' | 'wallet' | 'paypal',
-      details?: { phoneNumber?: string }
-    ) => {
+    async (video: Video) => {
       if (!authUser) {
         router.push('/login');
         return;
       }
       if (!firestore) return;
 
-      if (method === 'paypal') {
-        try {
-          const response = await fetch('/api/paypal/create-order', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              videoId: video.id,
-              amount: Number(video.price ?? 0),
-              currency: video.currency ?? 'USD',
-            }),
-          })
-          const data = await response.json()
-          if (!response.ok || !data?.approveUrl) {
-            throw new Error(data?.error || 'PayPal order failed')
-          }
-          window.location.href = data.approveUrl as string
-          return
-        } catch (error) {
-          console.error('PayPal error:', error)
-          toast({
-            title: 'Paiement PayPal échoué',
-            description: 'Veuillez réessayer.',
-            variant: 'destructive',
-          })
-          throw error
-        }
-      }
-
-      if (method === 'mobile-money') {
-        try {
-          const response = await fetch('/api/wonyapay/purchase/initiate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userId: authUser.uid,
-              videoId: video.id,
-              phoneNumber: details?.phoneNumber,
-            }),
-          })
-          const data = await response.json()
-          if (!response.ok) {
-            throw new Error(data?.error || 'Paiement WonyaPay echoue')
-          }
-          if (data?.transactionStatus === 'completed') {
-            setUnlockedMap((prev) => ({ ...prev, [video.id]: true }))
-            setPendingStatus((prev) => ({ ...prev, [video.id]: 'completed' }))
-            toast({
-              title: 'Acces debloque',
-              description: 'Vous pouvez maintenant regarder ce contenu.',
-            })
-            return
-          }
-
-          // En attente : stocker et laisser le watcher gérer
-          const existing = readPending()
-          writePending([...existing, { purchaseId: data.purchaseId, videoId: video.id }])
-          notifyPendingUpdate()
-          setPendingStatus((prev) => ({ ...prev, [video.id]: 'pending' }))
-          setUnlockedMap((prev) => ({ ...prev, [video.id]: false }))
-          toast({
-            title: 'Confirmation requise',
-            description: 'Nous sommes en attente de la confirmation de votre paiement.',
-          })
-          return
-        } catch (error: any) {
-          setUnlockedMap((prev) => ({ ...prev, [video.id]: false }))
-          setPendingStatus((prev) => ({ ...prev, [video.id]: 'failed' }))
-          toast({
-            title: 'Paiement WonyaPay echoue',
-            description: error?.message || 'Veuillez reessayer.',
-            variant: 'destructive',
-          })
-          throw error
-        }
-      }
-
-      setUnlockedMap((prev) => ({ ...prev, [video.id]: true }));
-
       try {
-        await addDoc(collection(firestore, 'purchases'), {
-          userId: authUser.uid,
-          videoId: video.id,
-          amount: video.price ?? 0,
-          currency: video.currency ?? 'USD',
-          method,
-          status: 'completed',
-          createdAt: serverTimestamp(),
-        });
-
-        const creatorId = (video.userRef as any)?.id ?? video.user?.id
-        if (creatorId && creatorId !== authUser.uid) {
-          const walletRef = doc(firestore, 'wallets', creatorId)
-          const walletSnap = await getDoc(walletRef)
-          if (walletSnap.exists()) {
-            await updateDoc(walletRef, {
-              balance: increment(video.price ?? 0),
-              currency: video.currency ?? 'USD',
-              updatedAt: serverTimestamp(),
-              userId: creatorId,
-            })
-          } else {
-            await setDoc(walletRef, {
-              userId: creatorId,
-              balance: video.price ?? 0,
-              currency: video.currency ?? 'USD',
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp(),
-            })
+        const response = await fetch('/api/wallet/purchase', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: authUser.uid,
+            videoId: video.id,
+          }),
+        })
+        const data = await response.json()
+        if (response.status === 402) {
+          setUnlockedMap((prev) => ({ ...prev, [video.id]: false }))
+          return {
+            status: 'insufficient' as const,
+            balance: Number(data?.balance || 0),
+            amount: Number(data?.amount || video.price || 0),
           }
         }
+        if (!response.ok) {
+          throw new Error(data?.error || 'Achat impossible')
+        }
 
+        setUnlockedMap((prev) => ({ ...prev, [video.id]: true }));
+        setPendingStatus((prev) => ({ ...prev, [video.id]: 'completed' }))
         toast({
           title: 'Accès débloqué',
           description: 'Vous pouvez maintenant regarder ce contenu.',
         });
+        return { status: 'unlocked' as const }
       } catch (error) {
         console.error('Payment error:', error);
         setUnlockedMap((prev) => ({ ...prev, [video.id]: false }));
@@ -548,6 +580,30 @@ export default function Home() {
       }
     },
     [authUser, firestore, router, toast]
+  );
+
+  const handleFeedSignal = useCallback(
+    (video: Video, event: 'view' | 'like') => {
+      const signals = readFeedSignals(authUser?.uid)
+      const now = Date.now()
+      const creatorId = getCreatorId(video)
+
+      if (event === 'view') {
+        if (signals.seenVideoIds[video.id] && now - signals.seenVideoIds[video.id] < 30_000) {
+          return
+        }
+        signals.seenVideoIds[video.id] = now
+        signals.creatorViews[creatorId] = (signals.creatorViews[creatorId] || 0) + 1
+      }
+
+      if (event === 'like') {
+        signals.likedVideoIds[video.id] = now
+        signals.likedCreators[creatorId] = (signals.likedCreators[creatorId] || 0) + 1
+      }
+
+      writeFeedSignals(authUser?.uid, signals)
+    },
+    [authUser?.uid]
   );
 
   useEffect(() => {
@@ -601,7 +657,7 @@ export default function Home() {
   if (loading) {
     return (
       <div className="w-full">
-        {genderTabs}
+        {showFeedGenderTabs && genderTabs}
         <div className="w-full md:mx-auto md:max-w-[640px]">
           {Array.from({ length: 2 }).map((_, index) => (
             <VideoCardSkeleton key={`skeleton-${index}`} />
@@ -613,7 +669,7 @@ export default function Home() {
 
   return (
     <div className="w-full">
-      {genderTabs}
+      {showFeedGenderTabs && genderTabs}
       <div className="w-full md:mx-auto md:max-w-[640px]">
         {videos.map((video) => {
           const ownerId = (video.userRef as any)?.id ?? video.user?.id;
@@ -631,6 +687,7 @@ export default function Home() {
               isLocked={isLocked}
               pendingStatus={status}
               onPay={handlePay}
+              onFeedSignal={handleFeedSignal}
               globalMuted={globalMuted}
               onMuteToggle={setGlobalMuted}
             />
