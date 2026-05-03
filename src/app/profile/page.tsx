@@ -5,9 +5,9 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { ClientFormattedNumber } from '@/components/client-formatted-number'
-import { useUser } from '@/firebase'
+import { useDoc, useUser } from '@/firebase'
 import { useRouter } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFirestore } from '@/firebase/provider'
 import { collection, deleteDoc, doc, getDoc, getDocs, query, updateDoc, where, writeBatch } from 'firebase/firestore'
 import { updateProfile } from 'firebase/auth'
@@ -214,6 +214,23 @@ export default function ProfilePage() {
     startDistance: 0,
     startAngle: 0,
   })
+
+  const kycDocRef = useMemo(() => {
+    if (!firestore || !user) return null
+    return doc(firestore, 'creatorKyc', user.uid)
+  }, [firestore, user])
+  const { data: kycData } = useDoc<{ status?: User['kycStatus'] }>(kycDocRef as any)
+  const kycStatus = kycData?.status || userData?.kycStatus || 'not_started'
+  const kycButtonLabel =
+    kycStatus === 'approved'
+      ? 'Identité approuvée'
+      : kycStatus === 'pending'
+        ? 'Identité en attente'
+        : kycStatus === 'rejected'
+          ? 'Identité refusée'
+          : kycStatus === 'draft'
+            ? 'Continuer la vérification'
+            : 'Confirmer mon identité'
 
   useEffect(() => {
     if (!userLoading && !user) {
@@ -778,7 +795,7 @@ export default function ProfilePage() {
             <Button variant="secondary" onClick={openEditProfile}>Modifier le profil</Button>
             {userData.role === 'creator' && (
               <Button variant="outline" onClick={() => router.push('/profile/kyc')}>
-                Confirmer mon identité
+                {kycButtonLabel}
               </Button>
             )}
           </div>

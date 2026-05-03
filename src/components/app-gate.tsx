@@ -7,6 +7,7 @@ import { AppLayout } from './layout/app-layout';
 import { FirebaseClientProvider } from '@/firebase/client-provider';
 import { GenderGate } from '@/components/gender-gate';
 import { AuthBootstrap } from '@/components/auth-bootstrap';
+import { KycStatusWatcher } from '@/components/kyc-status-watcher';
 import { useUser } from '@/firebase';
 import { usePathname, useRouter } from 'next/navigation';
 
@@ -64,6 +65,7 @@ export function AppGate({ children }: { children: React.ReactNode }) {
   return (
     <FirebaseClientProvider>
       <AuthBootstrap />
+      <KycStatusWatcher />
       <HomeRedirect />
       <GenderGate>
         <AppLayout>{children}</AppLayout>

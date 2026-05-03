@@ -61,7 +61,12 @@ export default function WalletPage() {
   }, [firestore, user])
   const { data: profile } = useDoc<User>(userDocRef as any)
   const isCreator = profile?.role === 'creator'
-  const kycApproved = profile?.kycStatus === 'approved'
+  const kycDocRef = useMemo(() => {
+    if (!firestore || !user) return null
+    return doc(firestore, 'creatorKyc', user.uid)
+  }, [firestore, user])
+  const { data: kycData } = useDoc<{ status?: User['kycStatus'] }>(kycDocRef as any)
+  const kycApproved = profile?.kycStatus === 'approved' || kycData?.status === 'approved'
 
   useEffect(() => {
     if (!userLoading && !user) {

@@ -25,12 +25,48 @@ export interface CloudinaryUploadResponse {
  */
 export async function uploadVideoToCloudinary(
   file: Blob,
-  onProgress?: (progress: number) => void
+  onProgress?: (progress: number) => void,
+  folder = 'videos'
 ): Promise<CloudinaryUploadResponse> {
+  if (!cloudinaryConfig.cloudName) {
+    throw new Error('Configuration Cloudinary video incomplete');
+  }
+
   const formData = new FormData();
-  formData.append('file', file);
-  formData.append('upload_preset', cloudinaryConfig.uploadPreset!);
-  formData.append('resource_type', 'video');
+  formData.append('file', file, 'kyc-selfie.webm');
+  let uploadCloudName = cloudinaryConfig.cloudName;
+  let uploadEndpoint = `https://api.cloudinary.com/v1_1/${uploadCloudName}/video/upload`;
+
+  try {
+    const signatureResponse = await fetch('/api/cloudinary/sign-video-upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folder }),
+    });
+
+    if (signatureResponse.ok) {
+      const signedUpload = await signatureResponse.json();
+      uploadCloudName = signedUpload.cloudName || uploadCloudName;
+      formData.append('api_key', signedUpload.apiKey);
+      formData.append('timestamp', String(signedUpload.timestamp));
+      formData.append('signature', signedUpload.signature);
+      formData.append('folder', signedUpload.folder);
+      uploadEndpoint = `https://api.cloudinary.com/v1_1/${uploadCloudName}/video/upload`;
+    } else if (cloudinaryConfig.uploadPreset) {
+      formData.append('upload_preset', cloudinaryConfig.uploadPreset);
+      uploadEndpoint = `https://api.cloudinary.com/v1_1/${uploadCloudName}/upload`;
+    } else {
+      const response = await signatureResponse.json().catch(() => null);
+      throw new Error(response?.error || 'Configuration Cloudinary video incomplete');
+    }
+  } catch (error) {
+    if (cloudinaryConfig.uploadPreset && !formData.get('upload_preset')) {
+      formData.append('upload_preset', cloudinaryConfig.uploadPreset);
+      uploadEndpoint = `https://api.cloudinary.com/v1_1/${uploadCloudName}/upload`;
+    } else {
+      throw error;
+    }
+  }
   
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -59,10 +95,10 @@ export async function uploadVideoToCloudinary(
     });
     
     xhr.addEventListener('error', () => {
-      reject(new Error('Upload failed'));
+      reject(new Error('Upload Cloudinary impossible. Vérifiez la connexion ou la configuration Cloudinary.'));
     });
     
-    xhr.open('POST', `https://api.cloudinary.com/v1_1/${cloudinaryConfig.cloudName}/upload`);
+    xhr.open('POST', uploadEndpoint);
     xhr.send(formData);
   });
 }

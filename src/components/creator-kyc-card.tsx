@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { uploadImageToCloudinary, uploadVideoToCloudinary } from '@/lib/cloudinary'
 import type { User } from '@/lib/types'
+import { useToast } from '@/hooks/use-toast'
 
 type KycDraft = {
   status?: 'draft' | 'pending' | 'approved' | 'rejected'
@@ -21,6 +22,7 @@ type KycDraft = {
 export function CreatorKycCard({ profile }: { profile: User }) {
   const firestore = useFirestore()
   const { user } = useUser()
+  const { toast } = useToast()
   const [recording, setRecording] = useState(false)
   const [recordingStep, setRecordingStep] = useState('Face')
   const [uploadingSelfie, setUploadingSelfie] = useState(false)
@@ -39,7 +41,7 @@ export function CreatorKycCard({ profile }: { profile: User }) {
   const { data: kyc } = useDoc<KycDraft>(kycRef as any)
 
   const status = kyc?.status || profile.kycStatus || 'not_started'
-  const canSubmit = Boolean(kyc?.selfieVideoUrl && kyc?.documentUrl && status !== 'approved')
+  const canSubmit = Boolean(kyc?.selfieVideoUrl && kyc?.documentUrl && status !== 'approved' && status !== 'pending')
 
   const saveDraft = async (data: Partial<KycDraft>) => {
     if (!firestore || !user || !kycRef) return
@@ -58,45 +60,67 @@ export function CreatorKycCard({ profile }: { profile: User }) {
 
   const startSelfie = async () => {
     if (!firestore || !user) return
-    const mediaStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user' },
-      audio: true,
-    })
-    setStream(mediaStream)
-    if (videoRef.current) {
-      videoRef.current.srcObject = mediaStream
-      await videoRef.current.play().catch(() => undefined)
-    }
+    let mediaStream: MediaStream | null = null
+    try {
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user' },
+        audio: true,
+      })
+      setStream(mediaStream)
+      if (videoRef.current) {
+        videoRef.current.srcObject = mediaStream
+        await videoRef.current.play().catch(() => undefined)
+      }
 
-    chunksRef.current = []
-    const recorder = new MediaRecorder(mediaStream)
-    recorderRef.current = recorder
-    recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) chunksRef.current.push(event.data)
-    }
-    recorder.onstop = async () => {
-      mediaStream.getTracks().forEach((track) => track.stop())
+      chunksRef.current = []
+      const recorder = new MediaRecorder(mediaStream)
+      recorderRef.current = recorder
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunksRef.current.push(event.data)
+      }
+      recorder.onstop = async () => {
+        mediaStream?.getTracks().forEach((track) => track.stop())
+        setStream(null)
+        setRecording(false)
+        setUploadingSelfie(true)
+        try {
+          const blob = new Blob(chunksRef.current, { type: 'video/webm' })
+          const upload = await uploadVideoToCloudinary(blob, undefined, 'creator-kyc-selfies')
+          await saveDraft({
+            selfieVideoUrl: upload.secure_url,
+            selfiePublicId: upload.public_id,
+          })
+          toast({ title: 'Vidéo selfie enregistrée' })
+        } catch (error: any) {
+          toast({
+            title: 'Upload selfie échoué',
+            description: error?.message || 'Veuillez réessayer.',
+            variant: 'destructive',
+          })
+        } finally {
+          setUploadingSelfie(false)
+        }
+      }
+
+      setRecording(true)
+      setRecordingStep('Face')
+      recorder.start()
+      window.setTimeout(() => setRecordingStep('Tournez la tête à gauche'), 3000)
+      window.setTimeout(() => setRecordingStep('Tournez la tête à droite'), 6500)
+      window.setTimeout(() => recorder.state !== 'inactive' && recorder.stop(), 10000)
+    } catch (error: any) {
+      mediaStream?.getTracks().forEach((track) => track.stop())
       setStream(null)
       setRecording(false)
-      setUploadingSelfie(true)
-      try {
-        const blob = new Blob(chunksRef.current, { type: 'video/webm' })
-        const upload = await uploadVideoToCloudinary(blob)
-        await saveDraft({
-          selfieVideoUrl: upload.secure_url,
-          selfiePublicId: upload.public_id,
-        })
-      } finally {
+      toast({
+        title: 'Caméra indisponible',
+        description: error?.message || 'Autorisez la caméra pour continuer.',
+        variant: 'destructive',
+      })
+      if (uploadingSelfie) {
         setUploadingSelfie(false)
       }
     }
-
-    setRecording(true)
-    setRecordingStep('Face')
-    recorder.start()
-    window.setTimeout(() => setRecordingStep('Tournez la tête à gauche'), 3000)
-    window.setTimeout(() => setRecordingStep('Tournez la tête à droite'), 6500)
-    window.setTimeout(() => recorder.state !== 'inactive' && recorder.stop(), 10000)
   }
 
   const handleDocumentFile = async (file?: File) => {
@@ -109,6 +133,13 @@ export function CreatorKycCard({ profile }: { profile: User }) {
         documentPublicId: upload.public_id,
         documentType,
       })
+      toast({ title: 'Pièce enregistrée' })
+    } catch (error: any) {
+      toast({
+        title: 'Upload document échoué',
+        description: error?.message || 'Veuillez réessayer.',
+        variant: 'destructive',
+      })
     } finally {
       setUploadingDocument(false)
     }
@@ -118,9 +149,21 @@ export function CreatorKycCard({ profile }: { profile: User }) {
     if (!firestore || !user || !kycRef || !canSubmit) return
     setSubmitting(true)
     try {
+      const currentSelfieUrl = kyc?.selfieVideoUrl
+      const currentDocumentUrl = kyc?.documentUrl
+      if (!currentSelfieUrl || !currentDocumentUrl) {
+        toast({
+          title: 'Dossier incomplet',
+          description: 'La vidéo selfie et la pièce d’identité doivent être enregistrées avant la soumission.',
+          variant: 'destructive',
+        })
+        return
+      }
       await setDoc(
         kycRef,
         {
+          selfieVideoUrl: currentSelfieUrl,
+          documentUrl: currentDocumentUrl,
           status: 'pending',
           submittedAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -128,6 +171,7 @@ export function CreatorKycCard({ profile }: { profile: User }) {
         { merge: true }
       )
       await setDoc(doc(firestore, 'users', user.uid), { kycStatus: 'pending' }, { merge: true })
+      toast({ title: 'Dossier soumis', description: 'Votre demande est en attente de validation.' })
     } finally {
       setSubmitting(false)
     }
@@ -167,7 +211,7 @@ export function CreatorKycCard({ profile }: { profile: User }) {
             {kyc?.selfieVideoUrl && <CheckCircle2 className="h-5 w-5 text-emerald-400" />}
           </div>
           <div className="relative aspect-video overflow-hidden rounded-2xl bg-black">
-            <video ref={videoRef} className="h-full w-full object-cover" muted playsInline />
+            <video ref={videoRef} className="h-full w-full scale-x-[-1] object-cover" muted playsInline />
             <div className="pointer-events-none absolute inset-0 border-2 border-primary/50">
               <div className="absolute inset-x-6 top-1/2 h-px bg-primary/70 shadow-[0_0_18px_hsl(var(--primary))]" />
               <div className="absolute left-1/2 top-1/2 h-40 w-40 -translate-x-1/2 -translate-y-1/2 rounded-full border border-primary/60" />
@@ -181,7 +225,7 @@ export function CreatorKycCard({ profile }: { profile: User }) {
           </div>
           <Button onClick={startSelfie} disabled={recording || uploadingSelfie || status === 'pending'} className="gap-2">
             {uploadingSelfie ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
-            {kyc?.selfieVideoUrl ? 'Reprendre la vidéo selfie' : 'Démarrer la vidéo selfie'}
+            {uploadingSelfie ? 'Upload de la vidéo...' : kyc?.selfieVideoUrl ? 'Reprendre la vidéo selfie' : 'Démarrer la vidéo selfie'}
           </Button>
         </div>
 
@@ -223,8 +267,8 @@ export function CreatorKycCard({ profile }: { profile: User }) {
           )}
         </div>
 
-        <Button className="w-full" onClick={submitKyc} disabled={!canSubmit || submitting || status === 'pending'}>
-          {submitting ? 'Soumission...' : status === 'pending' ? 'Dossier en attente' : 'Soumettre pour validation'}
+        <Button className="w-full" onClick={submitKyc} disabled={!canSubmit || submitting || uploadingSelfie || uploadingDocument || status === 'pending'}>
+          {submitting ? 'Chargement des données...' : status === 'pending' ? 'Dossier en attente' : 'Soumettre pour validation'}
         </Button>
       </CardContent>
     </Card>
