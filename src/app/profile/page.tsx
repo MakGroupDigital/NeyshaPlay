@@ -15,7 +15,6 @@ import type { User, Video } from '@/lib/types'
 import { Settings, UserPlus, Users, Heart, X, Play, Pause, Volume2, VolumeX, Share2, Copy, QrCode, MoreVertical, Trash2, Edit, Camera, Loader2, Eye } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { uploadImageToCloudinary } from '@/lib/cloudinary'
-import { CreatorKycCard } from '@/components/creator-kyc-card'
 
 const countriesByRegion = [
   {
@@ -775,7 +774,14 @@ export default function ProfilePage() {
               </span>
             )}
           </div>
-          <Button variant="secondary" onClick={openEditProfile}>Modifier le profil</Button>
+          <div className="flex flex-col items-center gap-2">
+            <Button variant="secondary" onClick={openEditProfile}>Modifier le profil</Button>
+            {userData.role === 'creator' && (
+              <Button variant="outline" onClick={() => router.push('/profile/kyc')}>
+                Confirmer mon identité
+              </Button>
+            )}
+          </div>
         </div>
 
         <div className="flex justify-center gap-6 border-y py-4">
@@ -794,10 +800,6 @@ export default function ProfilePage() {
             )
           })}
         </div>
-
-        {userData.role === 'creator' && (
-          <CreatorKycCard profile={userData} />
-        )}
 
         {userData.role === 'creator' && (
           <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-4">
