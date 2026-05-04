@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { CreatorKycCard } from '@/components/creator-kyc-card'
 import { useDoc, useFirestore, useUser } from '@/firebase'
 import type { User } from '@/lib/types'
+import { hasCreatorAccess } from '@/lib/roles'
 
 export default function CreatorKycPage() {
   const router = useRouter()
@@ -37,7 +38,7 @@ export default function CreatorKycPage() {
 
   if (!profile) return null
 
-  if (profile.role !== 'creator') {
+  if (!hasCreatorAccess(profile)) {
     return (
       <div className="mx-auto max-w-xl px-4 py-10 text-center">
         <p className="text-muted-foreground">Cette vérification est réservée aux comptes créateurs.</p>

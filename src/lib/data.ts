@@ -1,4 +1,7 @@
 import type { User, Video, Notification } from './types'
+import { Timestamp } from 'firebase/firestore'
+
+const mockTimestamp = Timestamp.fromDate(new Date('2025-01-01T00:00:00.000Z'))
 
 export const mockUsers: User[] = [
   {
@@ -10,6 +13,9 @@ export const mockUsers: User[] = [
     followers: 2500000,
     likes: 10200000,
     bio: 'Just for fun ✨ Living my best life.',
+    role: 'creator',
+    email: 'neysha@example.com',
+    createdAt: mockTimestamp,
   },
   {
     id: '2',
@@ -20,6 +26,9 @@ export const mockUsers: User[] = [
     followers: 120000,
     likes: 5400000,
     bio: 'Creator | Dancer | Tech Geek',
+    role: 'creator',
+    email: 'alex@example.com',
+    createdAt: mockTimestamp,
   },
   {
     id: '3',
@@ -30,6 +39,9 @@ export const mockUsers: User[] = [
     followers: 890000,
     likes: 12000000,
     bio: 'Art and technology combined. Follow for daily inspiration.',
+    role: 'creator',
+    email: 'creative@example.com',
+    createdAt: mockTimestamp,
   },
 ]
 
@@ -44,6 +56,7 @@ export const mockVideos: Video[] = [
     likes: 120000,
     comments: 3400,
     shares: 1200,
+    createdAt: mockTimestamp,
   },
   {
     id: 'v2',
@@ -55,6 +68,7 @@ export const mockVideos: Video[] = [
     likes: 450000,
     comments: 12000,
     shares: 8000,
+    createdAt: mockTimestamp,
   },
   {
     id: 'v3',
@@ -66,6 +80,7 @@ export const mockVideos: Video[] = [
     likes: 88000,
     comments: 1500,
     shares: 500,
+    createdAt: mockTimestamp,
   },
   {
     id: 'v4',
@@ -77,6 +92,7 @@ export const mockVideos: Video[] = [
     likes: 210000,
     comments: 7800,
     shares: 2300,
+    createdAt: mockTimestamp,
   },
 ]
 

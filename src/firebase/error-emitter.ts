@@ -36,7 +36,7 @@ class ErrorEmitter {
     }
     this.listeners[event]!.forEach((listener) => {
       try {
-        listener(...args);
+        (listener as (...listenerArgs: Parameters<Events[K]>) => void)(...args);
       } catch (e) {
         console.error(`Error in listener for event "${event}":`, e);
       }

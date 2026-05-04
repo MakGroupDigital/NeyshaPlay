@@ -7,6 +7,7 @@ import { useFirestore } from '@/firebase/provider'
 import { useUser } from '@/firebase'
 import { collection, doc, getDoc, limit, onSnapshot, orderBy, query } from 'firebase/firestore'
 import type { User } from '@/lib/types'
+import { normalizeUserRole } from '@/lib/roles'
 
 function NeyshaIcon() {
   return (
@@ -89,7 +90,7 @@ export function TopCreators() {
           ...docSnap.data(),
         })) as User[]
 
-        const creators = users.filter((creator) => creator.role === 'creator')
+        const creators = users.filter((creator) => normalizeUserRole(creator.role) === 'creator')
         const filteredByGender = effectiveGender
           ? creators.filter((creator) => creator.gender === effectiveGender)
           : creators

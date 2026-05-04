@@ -7,12 +7,13 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Search, QrCode, X, Loader2 } from 'lucide-react'
+import { Search, QrCode, X, Loader2, Lock, Sparkles, Play } from 'lucide-react'
 import { useFirestore } from '@/firebase/provider'
 import { collection, query, where, getDocs, orderBy, limit, getDoc } from 'firebase/firestore'
 import type { Video, User } from '@/lib/types'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import Link from 'next/link'
+import { creatorMatchesSearch, extractTags, normalizeSearchValue, videoMatchesSearch } from '@/lib/content-search'
 
 const trendingHashtags = [
   '#dancechallenge',
@@ -148,7 +149,7 @@ export default function DiscoverPage() {
       setSearching(true)
       try {
         const results: SearchResult[] = []
-        const searchLower = trimmed.toLowerCase()
+        const searchLower = normalizeSearchValue(trimmed)
 
         // Recherche utilisateurs par username ou name
         const usersQuery = query(
@@ -158,9 +159,7 @@ export default function DiscoverPage() {
         const usersSnapshot = await getDocs(usersQuery)
         usersSnapshot.docs.forEach((doc) => {
           const userData = { id: doc.id, ...doc.data() } as User
-          const username = (userData.username || '').toLowerCase()
-          const name = (userData.name || '').toLowerCase()
-          if (username.includes(searchLower) || name.includes(searchLower)) {
+          if (creatorMatchesSearch(userData, searchLower)) {
             results.push({ type: 'user', data: userData })
           }
         })
@@ -175,27 +174,25 @@ export default function DiscoverPage() {
         
         for (const doc of videosSnapshot.docs) {
           const videoData = doc.data()
-          const description = (videoData.description || '').toLowerCase()
-          if (description.includes(searchLower)) {
-            // Résoudre l'utilisateur
-            let user: User | null = null
-            if (videoData.userRef) {
-              try {
-                const userDoc = await getDoc(videoData.userRef)
-                if (userDoc.exists()) {
-                  user = { id: userDoc.id, ...userDoc.data() } as User
-                }
-              } catch (error) {
-                console.warn('Failed to fetch user for video:', error)
-              }
+          let user: User | null = null
+          if (videoData.userRef) {
+            try {
+	              const userDoc = await getDoc(videoData.userRef)
+	              if (userDoc.exists()) {
+	                user = { id: userDoc.id, ...(userDoc.data() as Record<string, any>) } as User
+	              }
+            } catch (error) {
+              console.warn('Failed to fetch user for video:', error)
             }
-            
-            if (user) {
-              results.push({
-                type: 'video',
-                data: { id: doc.id, ...videoData, user } as Video
-              })
-            }
+          }
+
+          const tags = Array.isArray(videoData.tags) ? videoData.tags : extractTags(videoData.description)
+          const candidate = { id: doc.id, ...videoData, tags, user: user || undefined } as Video
+          if (user && videoMatchesSearch(candidate, searchLower)) {
+            results.push({
+              type: 'video',
+              data: { ...candidate, user } as Video
+            })
           }
         }
 
@@ -214,7 +211,7 @@ export default function DiscoverPage() {
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
           <Input 
-            placeholder="Rechercher..." 
+	            placeholder="Créateur, #tag, contenu, prix..." 
             className="pl-10 text-base h-12" 
             value={searchQuery}
             onChange={(e) => handleSearch(e.target.value)}
@@ -255,10 +252,10 @@ export default function DiscoverPage() {
                         <AvatarImage src={user.avatarUrl} alt={user.name} />
                         <AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
                       </Avatar>
-                      <div className="flex-1">
-                        <p className="font-semibold">{user.name}</p>
-                        <p className="text-sm text-muted-foreground">{user.username}</p>
-                      </div>
+	                      <div className="flex-1">
+	                        <p className="font-semibold">{user.name}</p>
+	                        <p className="text-sm text-muted-foreground">{user.username} · {user.country || 'Pays non renseigné'}</p>
+	                      </div>
                     </Link>
                   )
                 })}
@@ -277,14 +274,29 @@ export default function DiscoverPage() {
                       <Card key={video.id} className="overflow-hidden aspect-[3/4] border-0 rounded-none cursor-pointer">
                         <CardContent className="p-0">
                           <div className="relative h-full w-full">
-                            <Image 
-                              src={video.thumbnailUrl} 
-                              alt={video.description} 
-                              fill 
-                              className="object-cover" 
-                              data-ai-hint="search result video"
-                            />
-                          </div>
+	                            {video.thumbnailUrl ? (
+	                              <Image
+	                                src={video.thumbnailUrl}
+	                                alt={video.description || 'Vidéo'}
+	                                fill
+	                                className="object-cover"
+	                                data-ai-hint="search result video"
+	                              />
+	                            ) : (
+	                              <div className="flex h-full w-full items-center justify-center bg-black">
+	                                <Play className="h-6 w-6 text-white/60" />
+	                              </div>
+	                            )}
+	                            {(video.isPaid || Number(video.price || 0) > 0) && (
+	                              <div className="absolute left-1 top-1 inline-flex items-center gap-1 rounded-full bg-black/70 px-2 py-0.5 text-[10px] text-white">
+	                                <Lock className="h-3 w-3 text-primary" />
+	                                {video.price || 0} {video.currency || 'USD'}
+	                              </div>
+	                            )}
+	                            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-2">
+	                              <p className="line-clamp-2 text-[11px] text-white">{video.description}</p>
+	                            </div>
+	                          </div>
                         </CardContent>
                       </Card>
                     )
@@ -297,8 +309,12 @@ export default function DiscoverPage() {
 
       {!searchQuery && (
         <>
-          <div>
-            <h2 className="text-xl font-bold font-headline mb-4">Tendances</h2>
+	          <div>
+	            <h2 className="text-xl font-bold font-headline mb-4">Tendances</h2>
+	            <div className="mb-3 flex items-start gap-2 rounded-xl border border-primary/15 bg-primary/5 p-3 text-xs text-muted-foreground">
+	              <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+	              <span>Les suggestions combinent recherches populaires, tags, prix et contenus récemment publiés.</span>
+	            </div>
             <div className="flex flex-wrap gap-2">
               {trendingHashtags.map((tag) => (
                 <Badge key={tag} variant="secondary" className="text-sm px-3 py-1.5 hover:bg-accent cursor-pointer">

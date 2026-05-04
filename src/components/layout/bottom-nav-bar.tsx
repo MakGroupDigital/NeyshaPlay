@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Bell, Play, Plus, ShieldCheck, User as UserIcon, Wallet } from 'lucide-react'
+import { Bell, Library, Play, Plus, ShieldCheck, User as UserIcon, Wallet } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
@@ -156,8 +156,9 @@ export function BottomNavBar() {
 
     if (effectiveRole === 'admin') {
       return [
-        { href: '/', label: 'Play', icon: Play },
-        { href: '/admin', label: 'Admin', icon: ShieldCheck, auth: true },
+	        { href: '/', label: 'Play', icon: Play },
+	        { href: '/library', label: 'Biblio', icon: Library, auth: true },
+	        { href: '/admin', label: 'Admin', icon: ShieldCheck, auth: true },
         { href: '/wallet', label: 'Wallet', icon: Wallet, auth: true },
         { href: '/notifications', label: 'Notif', icon: Bell, auth: true },
         { href: '/profile', label: 'Profil', icon: UserIcon, auth: true },
@@ -167,8 +168,9 @@ export function BottomNavBar() {
     if (effectiveRole === 'creator') {
       // Creator menu
       return [
-        { href: '/', label: 'Play', icon: Play },
-        { href: '/create', label: 'Créer', icon: Plus, center: true },
+	        { href: '/', label: 'Play', icon: Play },
+	        { href: '/library', label: 'Biblio', icon: Library, auth: true },
+	        { href: '/create', label: 'Créer', icon: Plus, center: true },
         { href: '/wallet', label: 'Wallet', icon: Wallet, auth: true },
         { href: '/notifications', label: 'Notif', icon: Bell, auth: true },
         { href: '/profile', label: 'Profil', icon: UserIcon, auth: true },
@@ -177,8 +179,9 @@ export function BottomNavBar() {
 
     // User menu (default)
     return [
-      { href: '/', label: 'Play', icon: Play },
-      { href: '/wallet', label: 'Wallet', icon: Wallet, auth: true },
+	      { href: '/', label: 'Play', icon: Play },
+	      { href: '/library', label: 'Biblio', icon: Library, auth: true },
+	      { href: '/wallet', label: 'Wallet', icon: Wallet, auth: true },
       { href: '/notifications', label: 'Notif', icon: Bell, auth: true },
       { href: '/profile', label: 'Profil', icon: UserIcon, auth: true },
     ]

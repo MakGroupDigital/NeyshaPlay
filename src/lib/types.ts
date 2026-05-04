@@ -86,6 +86,7 @@ export type Video = {
   currency?: 'USD' | 'CDF' | string
   cloudinaryPublicId?: string
   creatorGender?: 'female' | 'male'
+  tags?: string[]
 }
 
 export type Notification = {

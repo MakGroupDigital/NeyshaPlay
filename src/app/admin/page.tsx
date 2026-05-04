@@ -52,7 +52,7 @@ import {
 } from '@/components/ui/table'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
-import { isAdminRole } from '@/lib/roles'
+import { isAdminRole, normalizeUserRole } from '@/lib/roles'
 
 type AdminKyc = {
   id: string
@@ -339,7 +339,7 @@ export default function AdminDashboardPage() {
     .filter((tx) => tx.type === 'earning' && tx.status === 'completed')
     .reduce((sum, tx) => sum + Number(tx.amount || 0), 0)
   const activeUsers = users.filter((user) => Date.now() - ts(user.lastSeenAt) < 10 * 60_000)
-  const creators = users.filter((user) => user.role === 'creator')
+  const creators = users.filter((user) => normalizeUserRole(user.role) === 'creator')
   const pendingKyc = kycItems.filter((item) => item.status === 'pending')
   const pendingWithdrawals = withdrawals.filter((item) => item.status === 'pending')
 
@@ -347,7 +347,7 @@ export default function AdminDashboardPage() {
     if (filter === 'all') return true
     if (filter === 'banned') return user.status === 'banned'
     if (filter === 'active') return user.status !== 'banned'
-    return user.role === filter
+    return normalizeUserRole(user.role) === filter
   })
 
   const topCreators = creators

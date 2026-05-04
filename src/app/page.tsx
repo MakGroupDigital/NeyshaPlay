@@ -34,8 +34,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Search, Play, Users } from 'lucide-react';
-import { isAdminRole } from '@/lib/roles';
+import { Search, Play, Users, Sparkles } from 'lucide-react';
+import { isAdminRole, normalizeUserRole } from '@/lib/roles';
+import { creatorMatchesSearch, extractTags, normalizeSearchValue, videoMatchesSearch } from '@/lib/content-search';
 
 const DEFAULT_PAGE_SIZE = 6;
 const FEED_SIGNAL_VERSION = 1;
@@ -215,14 +216,6 @@ function resolvePageSize() {
     default:
       return 7;
   }
-}
-
-function normalizeSearchValue(value: string) {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim()
 }
 
 function getWeekKey(date = new Date()) {
@@ -509,10 +502,10 @@ export default function Home() {
         const snapshot = await getDocs(creatorsQuery);
         if (cancelled) return;
         setSuggestedCreators(
-          snapshot.docs
-            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as User)
-            .filter((creator) => creator.role === 'creator')
-            .slice(0, 6)
+	          snapshot.docs
+	            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as User)
+	            .filter((creator) => normalizeUserRole(creator.role) === 'creator')
+	            .slice(0, 6)
         );
       } catch (error) {
         console.error('Error loading creator suggestions:', error);
@@ -547,25 +540,17 @@ export default function Home() {
         if (cancelled) return;
 
         const creators = usersSnapshot.docs
-          .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as User)
-          .filter((creator) => {
-            if (creator.role !== 'creator') return false;
-            const searchable = normalizeSearchValue(
-              `${creator.name || ''} ${creator.username || ''} ${creator.bio || ''} ${creator.city || ''} ${creator.country || ''}`
-            );
-            return searchable.includes(normalizedTerm);
-          })
+	          .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as User)
+	          .filter((creator) => {
+	            if (normalizeUserRole(creator.role) !== 'creator') return false;
+	            return creatorMatchesSearch(creator, searchTerm);
+	          })
           .slice(0, 8);
 
         const builtVideos = await buildVideos(videosSnapshot.docs);
         if (cancelled) return;
         const matchingVideos = builtVideos
-          .filter((video) => {
-            const searchable = normalizeSearchValue(
-              `${video.description || ''} ${video.song || ''} ${video.user?.name || ''} ${video.user?.username || ''}`
-            );
-            return searchable.includes(normalizedTerm);
-          })
+          .filter((video) => videoMatchesSearch(video, searchTerm))
           .slice(0, 10);
 
         setSearchCreators(creators);
@@ -815,7 +800,7 @@ export default function Home() {
               autoFocus
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Rechercher un nom ou un contenu"
+              placeholder="Créateur, #tag, contenu, prix..."
               className="h-11 rounded-full pl-9 pr-4"
             />
           </div>
@@ -880,11 +865,17 @@ export default function Home() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="line-clamp-2 text-sm font-medium">{video.description || 'Contenu vidéo'}</p>
-                        <p className="truncate text-xs text-muted-foreground">
-                          {video.user?.username} · {Number(video.likes || 0).toLocaleString()} likes
-                        </p>
-                      </div>
-                    </button>
+	                        <p className="truncate text-xs text-muted-foreground">
+	                          {video.user?.username} · {Number(video.likes || 0).toLocaleString()} likes
+	                          {video.isPaid || Number(video.price || 0) > 0 ? ` · ${video.price || 0} ${video.currency || 'USD'}` : ''}
+	                        </p>
+	                        <div className="mt-1 flex flex-wrap gap-1">
+	                          {extractTags(video.description).slice(0, 3).map((tag) => (
+	                            <span key={tag} className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-muted-foreground">#{tag}</span>
+	                          ))}
+	                        </div>
+	                      </div>
+	                    </button>
                   ))}
                 </div>
               ) : (
@@ -901,6 +892,10 @@ export default function Home() {
             <div className="flex items-center gap-2">
               <Users className="h-4 w-4 text-primary" />
               <h3 className="text-sm font-semibold text-white">Suggestions créateurs</h3>
+            </div>
+            <div className="flex items-start gap-2 rounded-lg border border-primary/15 bg-primary/5 p-3 text-xs text-muted-foreground">
+              <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <span>Basées sur votre choix de contenu, vos vues, vos likes et les créateurs populaires.</span>
             </div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {suggestedCreators.map((creator) => (

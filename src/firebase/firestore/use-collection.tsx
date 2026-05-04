@@ -3,11 +3,7 @@
 import { useEffect, useState } from 'react';
 import {
   onSnapshot,
-  query,
-  collection,
-  where,
   type DocumentData,
-  type Firestore,
   type CollectionReference,
   type Query,
 } from 'firebase/firestore';
@@ -81,7 +77,7 @@ export function useCollection<T = DocumentData>(
       },
       (error) => {
         const permissionError = new FirestorePermissionError({
-          path: q.path,
+          path: 'path' in q ? q.path : 'query',
           operation: 'list',
         } satisfies SecurityRuleContext);
 

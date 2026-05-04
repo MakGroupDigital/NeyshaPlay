@@ -4,7 +4,6 @@ import {
   Home,
   Bell,
   Search,
-  PlusSquare,
   User,
   Wallet,
 } from 'lucide-react'
@@ -19,7 +18,6 @@ import {
   SidebarFooter,
   SidebarContent,
 } from '@/components/ui/sidebar'
-import { CreatePostDialog } from '../create-post-dialog'
 import { Separator } from '../ui/separator'
 
 const menuItems = [
@@ -63,15 +61,14 @@ export function SidebarNav() {
       </SidebarContent>
       <SidebarFooter className='mt-auto'>
         <Separator className="my-2" />
-        <CreatePostDialog>
+        <Link href="/create" passHref>
           <SidebarMenuButton
             variant="default"
             className="w-full font-medium text-primary-foreground bg-primary hover:bg-primary/90"
           >
-            <PlusSquare className="h-5 w-5" />
             Créer
           </SidebarMenuButton>
-        </CreatePostDialog>
+        </Link>
       </SidebarFooter>
     </>
   )

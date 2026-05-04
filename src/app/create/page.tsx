@@ -17,6 +17,7 @@ import { useDoc, useUser } from '@/firebase'
 import { useFirestore } from '@/firebase/provider'
 import { addDoc, collection, doc, serverTimestamp } from 'firebase/firestore'
 import { uploadVideoToCloudinary, getVideoThumbnail } from '@/lib/cloudinary'
+import { extractTags } from '@/lib/content-search'
 import type { User } from '@/lib/types'
 
 const MAX_RECORDING_SECONDS = 15
@@ -1080,6 +1081,7 @@ export default function CreatePage() {
         price: isPaidContent ? parsedPrice : 0,
         currency: isPaidContent ? currency : 'USD',
         creatorGender: profile.gender,
+        tags: extractTags(caption),
       }
 
       await addDoc(collection(firestore, 'videos'), newVideo)

@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import type { Video } from '@/lib/types'
-import { Heart, MessageCircle, Send, Music, Volume2, VolumeX, Lock, Wallet, ShoppingBag } from 'lucide-react'
+import { Heart, MessageCircle, Send, Music, Volume2, VolumeX, Lock, Wallet, ShoppingBag, Bookmark } from 'lucide-react'
 import { ClientFormattedNumber } from './client-formatted-number'
 import { useFirestore, useUser } from '@/firebase'
 import { useRouter } from 'next/navigation'
@@ -57,6 +57,7 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
   const router = useRouter()
   const { toast } = useToast()
   const [isLiked, setIsLiked] = useState(false)
+  const [isFavorited, setIsFavorited] = useState(false)
   const [likes, setLikes] = useState(video.likes)
   const [isPlaying, setIsPlaying] = useState(false)
   const [showPaySheet, setShowPaySheet] = useState(false)
@@ -99,6 +100,17 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
       .catch((error) => {
         console.warn('Unable to load like status:', error)
       })
+  }, [firestore, authUser, video.id])
+
+  useEffect(() => {
+    if (!firestore || !authUser) {
+      setIsFavorited(false)
+      return
+    }
+
+    getDoc(doc(firestore, 'users', authUser.uid, 'favorites', video.id))
+      .then((snapshot) => setIsFavorited(snapshot.exists()))
+      .catch(() => undefined)
   }, [firestore, authUser, video.id])
 
   const handleLike = async (e: React.MouseEvent) => {
@@ -198,6 +210,44 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
       // Fallback: copy link to clipboard
       navigator.clipboard.writeText(window.location.href)
       console.log('Link copied to clipboard')
+    }
+  }
+
+  const handleFavorite = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!authUser) {
+      router.push('/login')
+      return
+    }
+    if (!firestore) return
+
+    const next = !isFavorited
+    setIsFavorited(next)
+    try {
+      const favoriteRef = doc(firestore, 'users', authUser.uid, 'favorites', video.id)
+      if (next) {
+        await setDoc(favoriteRef, {
+          videoId: video.id,
+          creatorId: (video.userRef as any)?.id || video.user?.id || null,
+          description: video.description || '',
+          thumbnailUrl: video.thumbnailUrl || '',
+          isPaid: Boolean(video.isPaid || Number(video.price || 0) > 0),
+          price: Number(video.price || 0),
+          currency: video.currency || 'USD',
+          createdAt: serverTimestamp(),
+        })
+        toast({ title: 'Ajouté aux favoris' })
+      } else {
+        await deleteDoc(favoriteRef)
+        toast({ title: 'Retiré des favoris' })
+      }
+    } catch (error) {
+      setIsFavorited(!next)
+      toast({
+        title: 'Favori impossible',
+        description: 'Veuillez réessayer.',
+        variant: 'destructive',
+      })
     }
   }
 
@@ -576,7 +626,7 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
         <div className="absolute bottom-[calc(6rem+env(safe-area-inset-bottom))] left-0 right-0 p-4 text-white">
           <div className="max-w-[85%] rounded-2xl border border-white/15 bg-black/45 p-4 shadow-xl shadow-black/50 backdrop-blur-md">
             <Link href={`/u/${video.user.id}`} className="font-bold font-headline hover:underline">
-              {video.user.username}
+              {video.user.name || video.user.username || 'Utilisateur'}
             </Link>
             <p className="text-sm text-foreground/80">{video.description}</p>
             <div className="flex items-center gap-2 mt-2 text-sm text-foreground/80">
@@ -596,10 +646,10 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
           </Avatar>
         </Link>
 
-        <div className="flex flex-col items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon"
+	        <div className="flex flex-col items-center gap-1">
+	          <Button
+	            variant="ghost"
+	            size="icon"
             className="rounded-full h-20 w-20 p-0 text-white hover:bg-white/10 hover:text-white"
             onClick={toggleMute}
           >
@@ -628,10 +678,27 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
           </Button>
           <span className="text-sm font-medium text-white text-right">
             <ClientFormattedNumber value={likes} />
-          </span>
-        </div>
+	          </span>
+	        </div>
 
-        <div className="flex flex-col items-center gap-1">
+	        <div className="flex flex-col items-center gap-1">
+	          <Button
+	            variant="ghost"
+	            size="icon"
+	            className="rounded-full h-20 w-20 p-0 text-white hover:bg-white/10 hover:text-white"
+	            onClick={handleFavorite}
+	            aria-label={isFavorited ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+	          >
+	            <Bookmark
+	              className={cn(
+	                'h-20 w-20 transition-all',
+	                isFavorited ? 'fill-primary text-primary drop-shadow-glow-primary' : ''
+	              )}
+	            />
+	          </Button>
+	        </div>
+
+	        <div className="flex flex-col items-center gap-1">
           <Button 
             variant="ghost" 
             size="icon" 
