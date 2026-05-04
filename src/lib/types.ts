@@ -1,6 +1,6 @@
 import { DocumentReference, Timestamp } from "firebase/firestore";
 
-export type UserRole = 'user' | 'creator';
+export type UserRole = 'user' | 'creator' | 'admin';
 
 export type User = {
   id: string
@@ -21,6 +21,9 @@ export type User = {
   city?: string
   birthDate?: string
   kycStatus?: 'not_started' | 'draft' | 'pending' | 'approved' | 'rejected'
+  status?: 'active' | 'banned'
+  lastSeenAt?: Timestamp
+  updatedAt?: Timestamp
 }
 
 export type Wallet = {
@@ -55,6 +58,12 @@ export type Transaction = {
     providerStatus?: string
     providerPayload?: Record<string, any> | null
     withdrawalRequestId?: string
+    platformCommissionPercent?: number
+    platformCommissionAmount?: number
+    grossAmount?: number
+    netWalletCredit?: number
+    creatorNetAmount?: number
+    netPayoutAmount?: number
   }
 }
 

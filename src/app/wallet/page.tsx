@@ -23,6 +23,7 @@ import { useDoc, useFirestore, useUser } from '@/firebase'
 import { ClientFormattedNumber } from '@/components/client-formatted-number'
 import type { Transaction, User, Wallet } from '@/lib/types'
 import { useToast } from '@/hooks/use-toast'
+import { hasCreatorAccess } from '@/lib/roles'
 
 const MIN_DEPOSIT_AMOUNT = 10
 const MIN_WITHDRAW_AMOUNT = 10
@@ -60,12 +61,12 @@ export default function WalletPage() {
     return doc(firestore, 'users', user.uid)
   }, [firestore, user])
   const { data: profile } = useDoc<User>(userDocRef as any)
-  const isCreator = profile?.role === 'creator'
   const kycDocRef = useMemo(() => {
     if (!firestore || !user) return null
     return doc(firestore, 'creatorKyc', user.uid)
   }, [firestore, user])
   const { data: kycData } = useDoc<{ status?: User['kycStatus'] }>(kycDocRef as any)
+  const isCreator = hasCreatorAccess(profile, kycData?.status)
   const kycApproved = profile?.kycStatus === 'approved' || kycData?.status === 'approved'
 
   useEffect(() => {

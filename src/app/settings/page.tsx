@@ -16,6 +16,7 @@ import { Separator } from '@/components/ui/separator'
 import { useToast } from '@/hooks/use-toast'
 import { ArrowLeft, Bell, Shield, Video, Wallet, User2, LogOut, Key, Globe, Palette, UserX, Sparkles } from 'lucide-react'
 import type { User } from '@/lib/types'
+import { hasCreatorAccess } from '@/lib/roles'
 
 const creatorCountriesByRegion = [
   {
@@ -204,6 +205,7 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<UserSettings>(defaultSettings)
   const [blockedInput, setBlockedInput] = useState('')
   const [isBecomingCreator, setIsBecomingCreator] = useState(false)
+  const [creatorKycStatus, setCreatorKycStatus] = useState<User['kycStatus']>('not_started')
 
   useEffect(() => {
     if (!userLoading && !authUser) {
@@ -221,6 +223,7 @@ export default function SettingsPage() {
         if (snap.exists()) {
           const data = { id: snap.id, ...snap.data() } as User & { settings?: Partial<UserSettings> }
           setProfile(data)
+          setCreatorKycStatus(data.kycStatus || 'not_started')
           setSettings({
             ...defaultSettings,
             ...data.settings,
@@ -257,6 +260,10 @@ export default function SettingsPage() {
               ...(data.settings?.creator || {}),
             },
           })
+        }
+        const kycSnap = await getDoc(doc(firestore, 'creatorKyc', authUser.uid)).catch(() => null)
+        if (kycSnap?.exists()) {
+          setCreatorKycStatus((kycSnap.data()?.status as User['kycStatus']) || 'draft')
         }
       } catch (error) {
         console.error('Error loading settings:', error)
@@ -394,7 +401,8 @@ export default function SettingsPage() {
     )
   }
 
-  const isCreator = profile.role === 'creator'
+  const isCreator =
+    hasCreatorAccess(profile, creatorKycStatus)
   const isGenderMissing = !profile.gender
 
   return (

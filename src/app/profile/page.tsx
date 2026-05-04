@@ -9,12 +9,13 @@ import { useDoc, useUser } from '@/firebase'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFirestore } from '@/firebase/provider'
-import { collection, deleteDoc, doc, getDoc, getDocs, query, updateDoc, where, writeBatch } from 'firebase/firestore'
+import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, updateDoc, where, writeBatch } from 'firebase/firestore'
 import { updateProfile } from 'firebase/auth'
 import type { User, Video } from '@/lib/types'
 import { Settings, UserPlus, Users, Heart, X, Play, Pause, Volume2, VolumeX, Share2, Copy, QrCode, MoreVertical, Trash2, Edit, Camera, Loader2, Eye } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { uploadImageToCloudinary } from '@/lib/cloudinary'
+import { hasCreatorAccess, isAdminRole } from '@/lib/roles'
 
 const countriesByRegion = [
   {
@@ -195,6 +196,8 @@ export default function ProfilePage() {
   const [avatarOpen, setAvatarOpen] = useState(false)
   const [showCreatorDialog, setShowCreatorDialog] = useState(false)
   const [acceptPolicy, setAcceptPolicy] = useState(false)
+  const [followersCount, setFollowersCount] = useState<number | null>(null)
+  const [followingCount, setFollowingCount] = useState<number | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const avatarInputRef = useRef<HTMLInputElement>(null)
   const cropGestureRef = useRef<{
@@ -264,6 +267,31 @@ export default function ProfilePage() {
   }, [user, firestore])
 
   useEffect(() => {
+    if (!firestore || !user) {
+      setFollowersCount(null)
+      setFollowingCount(null)
+      return
+    }
+
+    const userDocRef = doc(firestore, 'users', user.uid)
+    const unsubscribeFollowers = onSnapshot(
+      collection(userDocRef, 'followers'),
+      (snapshot) => setFollowersCount(snapshot.size),
+      () => setFollowersCount(null)
+    )
+    const unsubscribeFollowing = onSnapshot(
+      collection(userDocRef, 'following'),
+      (snapshot) => setFollowingCount(snapshot.size),
+      () => setFollowingCount(null)
+    )
+
+    return () => {
+      unsubscribeFollowers()
+      unsubscribeFollowing()
+    }
+  }, [firestore, user])
+
+  useEffect(() => {
     if (!userData) return
     if (typeof window === 'undefined') return
     const usernameSlug = userData.username?.replace(/^@/, '').trim()
@@ -294,13 +322,19 @@ export default function ProfilePage() {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`
   }
 
+  const displayName = userData.name || user.displayName || userData.username || 'Utilisateur'
+  const displayUsername = userData.username || (user.email ? `@${user.email.split('@')[0]}` : '@utilisateur')
+  const displayBio = userData.bio || ''
+  const displayAvatar = userData.avatarUrl || user.photoURL || ''
+  const displayInitial = displayName.trim().charAt(0).toUpperCase() || 'U'
+
   const handleShareProfile = async () => {
     if (!profileUrl) return
     try {
       if (navigator.share) {
         await navigator.share({
-          title: `Profil de ${userData.name}`,
-          text: `Découvrez le profil de ${userData.name} sur NeyshaPlay`,
+          title: `Profil de ${displayName}`,
+          text: `Découvrez le profil de ${displayName} sur NeyshaPlay`,
           url: profileUrl,
         })
       } else {
@@ -746,10 +780,12 @@ export default function ProfilePage() {
   }
 
   const totalVideoLikes = userVideos.reduce((total, video) => total + Number(video.likes || 0), 0)
+  const isCreatorAccount =
+    hasCreatorAccess(userData, kycStatus)
 
   const stats = [
-    { label: 'Abonnements', value: userData.following, icon: UserPlus },
-    { label: 'Abonnés', value: userData.followers, icon: Users },
+    { label: 'Abonnements', value: followingCount ?? Number(userData.following || 0), icon: UserPlus },
+    { label: 'Abonnés', value: followersCount ?? Number(userData.followers || 0), icon: Users },
     { label: 'J\'aime', value: totalVideoLikes, icon: Heart },
   ]
 
@@ -767,15 +803,15 @@ export default function ProfilePage() {
           </button>
           <button type="button" onClick={() => setAvatarOpen(true)} className="rounded-full">
             <Avatar className="h-32 w-32 border-4 border-primary">
-              <AvatarImage src={userData.avatarUrl} alt={userData.name} />
-              <AvatarFallback className="text-4xl">{userData.name.charAt(0)}</AvatarFallback>
+              <AvatarImage src={displayAvatar} alt={displayName} />
+              <AvatarFallback className="text-4xl">{displayInitial}</AvatarFallback>
             </Avatar>
           </button>
           <div className="text-center">
-            <h1 className="text-3xl font-bold font-headline">{userData.name}</h1>
-            <p className="text-muted-foreground">{userData.username}</p>
+            <h1 className="text-3xl font-bold font-headline">{displayName}</h1>
+            <p className="text-muted-foreground">{displayUsername}</p>
           </div>
-          <p className="max-w-md text-center text-foreground/80">{userData.bio}</p>
+          {displayBio && <p className="max-w-md text-center text-foreground/80">{displayBio}</p>}
           <div className="flex flex-wrap justify-center gap-2 text-xs text-muted-foreground">
             {userData.gender && (
               <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
@@ -795,7 +831,7 @@ export default function ProfilePage() {
           </div>
           <div className="flex flex-col items-center gap-2">
             <Button variant="secondary" onClick={openEditProfile}>Modifier le profil</Button>
-            {userData.role === 'creator' && (
+            {isCreatorAccount && !isAdminRole(userData.role) && (
               <Button variant="outline" onClick={() => router.push('/profile/kyc')}>
                 {kycButtonLabel}
               </Button>
@@ -820,7 +856,7 @@ export default function ProfilePage() {
           })}
         </div>
 
-        {userData.role === 'creator' && (
+        {isCreatorAccount && (
           <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-4">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -931,12 +967,12 @@ export default function ProfilePage() {
               </Card>
             ))}
           </div>
-          {userVideos.length === 0 && userData?.role === 'creator' && (
+          {userVideos.length === 0 && isCreatorAccount && (
             <div className="py-10 text-center text-muted-foreground">
               Aucune vidéo publiée pour le moment.
             </div>
           )}
-          {userVideos.length === 0 && userData?.role === 'user' && (
+          {userVideos.length === 0 && !isCreatorAccount && (
             <div className="py-8 space-y-4 text-center">
               <p className="text-lg font-semibold">Compte utilisateur</p>
               <p className="text-sm text-muted-foreground">
@@ -1023,7 +1059,11 @@ export default function ProfilePage() {
       <Dialog open={avatarOpen} onOpenChange={setAvatarOpen}>
         <DialogContent className="border-0 bg-black/95 p-0 shadow-none sm:max-w-2xl">
           <div className="flex min-h-[70dvh] items-center justify-center p-6">
-            <img src={userData.avatarUrl} alt={userData.name} className="max-h-[80dvh] max-w-full rounded-2xl object-contain" />
+            {displayAvatar ? (
+              <img src={displayAvatar} alt={displayName} className="max-h-[80dvh] max-w-full rounded-2xl object-contain" />
+            ) : (
+              <div className="flex h-64 items-center justify-center text-muted-foreground">Aucune photo de profil.</div>
+            )}
           </div>
         </DialogContent>
       </Dialog>

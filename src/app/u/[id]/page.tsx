@@ -8,12 +8,13 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { ClientFormattedNumber } from '@/components/client-formatted-number'
 import { useFirestore } from '@/firebase/provider'
-import { useUser } from '@/firebase'
+import { useDoc, useUser } from '@/firebase'
 import { collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, query, runTransaction, setDoc, serverTimestamp, where } from 'firebase/firestore'
 import { Eye, Lock, Pause, Play, UserCheck, Volume2, VolumeX, UserPlus, Users, Heart, X } from 'lucide-react'
 import type { User, Video } from '@/lib/types'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { createAppNotification } from '@/lib/notifications'
+import { isAdminRole } from '@/lib/roles'
 
 export default function PublicProfilePage() {
   const params = useParams()
@@ -31,6 +32,8 @@ export default function PublicProfilePage() {
   const [isFollowing, setIsFollowing] = useState(false)
   const [followBusy, setFollowBusy] = useState(false)
   const [avatarOpen, setAvatarOpen] = useState(false)
+  const [followersCount, setFollowersCount] = useState<number | null>(null)
+  const [followingCount, setFollowingCount] = useState<number | null>(null)
 
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -38,6 +41,9 @@ export default function PublicProfilePage() {
   const [progress, setProgress] = useState(0)
   const [duration, setDuration] = useState(0)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const authProfileRef = firestore && authUser ? doc(firestore, 'users', authUser.uid) : null
+  const { data: authProfile } = useDoc<User>(authProfileRef as any)
+  const isAdmin = isAdminRole(authProfile?.role)
 
   useEffect(() => {
     const fetchData = async () => {
@@ -111,6 +117,31 @@ export default function PublicProfilePage() {
   }, [firestore, profileRefPath])
 
   useEffect(() => {
+    if (!firestore || !profileRefPath) {
+      setFollowersCount(null)
+      setFollowingCount(null)
+      return
+    }
+
+    const profileRef = doc(firestore, profileRefPath)
+    const unsubscribeFollowers = onSnapshot(
+      collection(profileRef, 'followers'),
+      (snapshot) => setFollowersCount(snapshot.size),
+      () => setFollowersCount(null)
+    )
+    const unsubscribeFollowing = onSnapshot(
+      collection(profileRef, 'following'),
+      (snapshot) => setFollowingCount(snapshot.size),
+      () => setFollowingCount(null)
+    )
+
+    return () => {
+      unsubscribeFollowers()
+      unsubscribeFollowing()
+    }
+  }, [firestore, profileRefPath])
+
+  useEffect(() => {
     if (!firestore || !authUser || !userData || authUser.uid === userData.id) {
       setIsFollowing(false)
       return
@@ -139,8 +170,8 @@ export default function PublicProfilePage() {
   const totalVideoLikes = userVideos.reduce((total, video) => total + Number(video.likes || 0), 0)
 
   const stats = [
-    { label: 'Abonnements', value: userData.following, icon: UserPlus },
-    { label: 'Abonnés', value: userData.followers, icon: Users },
+    { label: 'Abonnements', value: followingCount ?? Number(userData.following || 0), icon: UserPlus },
+    { label: 'Abonnés', value: followersCount ?? Number(userData.followers || 0), icon: Users },
     { label: 'J\'aime', value: totalVideoLikes, icon: Heart },
   ]
 
@@ -152,7 +183,7 @@ export default function PublicProfilePage() {
   }
 
   const handleOpenVideo = (video: Video) => {
-    if (video.isPaid && (video.price ?? 0) > 0) {
+    if (!isAdmin && video.isPaid && (video.price ?? 0) > 0) {
       return
     }
     setSelectedVideo(video)
@@ -306,7 +337,7 @@ export default function PublicProfilePage() {
           </div>
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-1">
             {userVideos.map((video) => {
-              const isPaid = Boolean((video.isPaid ?? false) || Number(video.price || 0) > 0)
+              const isPaid = !isAdmin && Boolean((video.isPaid ?? false) || Number(video.price || 0) > 0)
               return (
                 <Card
                   key={video.id}

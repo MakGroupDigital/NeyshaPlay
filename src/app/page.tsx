@@ -14,6 +14,7 @@ import {
   limit,
   startAfter,
   where,
+  increment,
   type DocumentData,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
@@ -34,6 +35,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Search, Play, Users } from 'lucide-react';
+import { isAdminRole } from '@/lib/roles';
 
 const DEFAULT_PAGE_SIZE = 6;
 const FEED_SIGNAL_VERSION = 1;
@@ -223,6 +225,13 @@ function normalizeSearchValue(value: string) {
     .trim()
 }
 
+function getWeekKey(date = new Date()) {
+  const firstDay = new Date(date.getFullYear(), 0, 1)
+  const days = Math.floor((date.getTime() - firstDay.getTime()) / 86400000)
+  const week = Math.ceil((days + firstDay.getDay() + 1) / 7)
+  return `${date.getFullYear()}-W${String(week).padStart(2, '0')}`
+}
+
 function VideoCardSkeleton() {
   return (
     <div className="relative h-[100dvh] w-full snap-start snap-always overflow-hidden rounded-none bg-black">
@@ -273,6 +282,7 @@ export default function Home() {
   }, [firestore, authUser]);
 
   const { data: profile } = useDoc<User>(userDocRef as any);
+  const isAdmin = isAdminRole(profile?.role);
 
   useEffect(() => {
     const updatePageSize = () => setPageSize(resolvePageSize());
@@ -560,6 +570,17 @@ export default function Home() {
 
         setSearchCreators(creators);
         setSearchVideos(matchingVideos);
+        const trendId = `${getWeekKey()}_${normalizedTerm.replace(/[^a-z0-9]+/g, '-').slice(0, 48)}`
+        await setDoc(
+          doc(firestore, 'searchTrends', trendId),
+          {
+            term: normalizedTerm,
+            week: getWeekKey(),
+            count: increment(1),
+            updatedAt: new Date(),
+          },
+          { merge: true }
+        ).catch(() => undefined)
       } catch (error) {
         console.error('Search error:', error);
       } finally {
@@ -945,6 +966,7 @@ export default function Home() {
           const isLocked =
             Boolean((video.isPaid ?? false) || Number(video.price || 0) > 0) &&
             !isOwner &&
+            !isAdmin &&
             !unlockedMap[video.id];
           const status = pendingStatus[video.id];
 

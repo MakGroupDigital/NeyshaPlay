@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { arrayUnion, collection, doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore'
 import { getServerFirestore, getWalletRefByUserId } from '@/lib/firebase-server'
+import { hasCreatorAccess } from '@/lib/roles'
+import { PLATFORM_COMMISSION_PERCENT, PLATFORM_COMMISSION_RATE } from '@/lib/wallet-transactions'
 
 export const runtime = 'nodejs'
 
@@ -15,10 +17,13 @@ export async function POST(request: Request) {
 
     const firestore = getServerFirestore()
     const userSnap = await getDoc(doc(firestore, 'users', userId))
-    if (!userSnap.exists() || userSnap.data()?.role !== 'creator') {
+    const kycSnap = await getDoc(doc(firestore, 'creatorKyc', userId)).catch(() => null)
+    const userData = userSnap.exists() ? userSnap.data() : null
+    const kycStatus = kycSnap?.exists() ? kycSnap.data()?.status : userData?.kycStatus
+    if (!userSnap.exists() || !hasCreatorAccess(userData as any, kycStatus)) {
       return NextResponse.json({ error: 'Retrait reserve aux comptes createurs' }, { status: 403 })
     }
-    if (userSnap.data()?.kycStatus !== 'approved') {
+    if (kycStatus !== 'approved') {
       return NextResponse.json(
         { error: 'Confirmez votre identité avant de retirer vos fonds' },
         { status: 403 }
@@ -41,11 +46,16 @@ export async function POST(request: Request) {
     const transactionId = `withdraw_request_${requestRef.id}`
     const normalizedPhone = String(phoneNumber).trim()
     const withdrawalMethod = method || 'mobile_money'
+    const platformCommissionAmount = Math.round(numericAmount * PLATFORM_COMMISSION_RATE * 100) / 100
+    const netPayoutAmount = Math.max(0, numericAmount - platformCommissionAmount)
 
     await setDoc(requestRef, {
       userId,
       walletId: walletRef.id,
       amount: numericAmount,
+      platformCommissionPercent: PLATFORM_COMMISSION_PERCENT,
+      platformCommissionAmount,
+      netPayoutAmount,
       currency: 'USD',
       method: withdrawalMethod,
       phoneNumber: normalizedPhone,
@@ -71,6 +81,10 @@ export async function POST(request: Request) {
           withdrawalMethod,
           withdrawalRequestId: requestRef.id,
           phoneNumber: normalizedPhone,
+          platformCommissionPercent: PLATFORM_COMMISSION_PERCENT,
+          platformCommissionAmount,
+          grossAmount: numericAmount,
+          netPayoutAmount,
         },
       }),
     })
@@ -80,6 +94,8 @@ export async function POST(request: Request) {
       requestId: requestRef.id,
       transactionId,
       transactionStatus: 'pending',
+      platformCommissionAmount,
+      netPayoutAmount,
     })
   } catch (error: any) {
     return NextResponse.json({ error: error?.message || 'Erreur demande de retrait' }, { status: 500 })

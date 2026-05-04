@@ -1,8 +1,9 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, getDocFromServer, serverTimestamp, setDoc } from 'firebase/firestore'
 import { useFirestore, useUser } from '@/firebase'
+import { normalizeUserRole } from '@/lib/roles'
 
 export function AuthBootstrap() {
   const { user, loading } = useUser()
@@ -16,7 +17,7 @@ export function AuthBootstrap() {
 
     const ensureProfile = async () => {
       const userRef = doc(firestore, 'users', user.uid)
-      const snapshot = await getDoc(userRef)
+      const snapshot = await getDocFromServer(userRef)
 
       const baseName =
         user.displayName ||
@@ -37,13 +38,12 @@ export function AuthBootstrap() {
         followers: 0,
         following: 0,
         likes: 0,
-        role: 'user',
         feedGender: 'all',
         createdAt: serverTimestamp(),
       }
 
       if (!snapshot.exists()) {
-        await setDoc(userRef, baseProfile, { merge: true })
+        await setDoc(userRef, { ...baseProfile, role: 'user' }, { merge: true })
         return
       }
 
@@ -58,7 +58,7 @@ export function AuthBootstrap() {
       if (typeof data.followers !== 'number') updates.followers = 0
       if (typeof data.following !== 'number') updates.following = 0
       if (typeof data.likes !== 'number') updates.likes = 0
-      if (!data.role) updates.role = 'user'
+      if (data.role && data.role !== normalizeUserRole(data.role)) updates.role = normalizeUserRole(data.role)
       if (!data.feedGender) {
         updates.feedGender = data.gender === 'female' || data.gender === 'male' ? data.gender : 'all'
       }
@@ -71,6 +71,39 @@ export function AuthBootstrap() {
     ensureProfile().catch((error) => {
       console.warn('Auth bootstrap failed:', error)
     })
+  }, [firestore, loading, user])
+
+  useEffect(() => {
+    if (loading || !user || !firestore) return
+
+    const userRef = doc(firestore, 'users', user.uid)
+    const touchPresence = () => {
+      setDoc(
+        userRef,
+        {
+          lastSeenAt: serverTimestamp(),
+          clientInfo: {
+            language: typeof navigator !== 'undefined' ? navigator.language : '',
+            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          },
+        },
+        { merge: true }
+      ).catch((error) => {
+        console.warn('Presence update failed:', error)
+      })
+    }
+
+    touchPresence()
+    const interval = window.setInterval(touchPresence, 60_000)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') touchPresence()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
+    return () => {
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
   }, [firestore, loading, user])
 
   return null

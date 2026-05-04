@@ -15,6 +15,12 @@ import {
 import { getServerFirestore, getWalletRefByUserId } from '@/lib/firebase-server'
 
 export const MIN_WALLET_DEPOSIT_USD = 10
+export const PLATFORM_COMMISSION_PERCENT = 10
+export const PLATFORM_COMMISSION_RATE = PLATFORM_COMMISSION_PERCENT / 100
+
+function getPlatformCommission(amount: number) {
+  return Math.round(amount * PLATFORM_COMMISSION_RATE * 100) / 100
+}
 
 export async function creditWalletDeposit(input: {
   userId: string
@@ -26,6 +32,7 @@ export async function creditWalletDeposit(input: {
   const walletRef = await getWalletRefByUserId(input.userId)
   const walletSnap = await getDoc(walletRef)
   const transactionId = `deposit_${input.method}_${input.providerReference}`
+  const platformCommissionAmount = getPlatformCommission(input.amount)
   const transaction = {
     id: transactionId,
     walletId: walletRef.id,
@@ -39,6 +46,10 @@ export async function creditWalletDeposit(input: {
       depositMethod: input.method,
       providerReference: input.providerReference,
       providerPayload: input.providerPayload || null,
+      platformCommissionPercent: PLATFORM_COMMISSION_PERCENT,
+      platformCommissionAmount,
+      grossAmount: input.amount,
+      netWalletCredit: input.amount,
     },
   }
 
@@ -127,6 +138,8 @@ export async function purchaseVideoWithWallet(input: { userId: string; videoId: 
   const purchaseRef = doc(collection(firestore, 'purchases'))
   const purchaseId = purchaseRef.id
   const buyerTransactions = Array.isArray(buyerWallet?.transactions) ? buyerWallet.transactions : []
+  const platformCommissionAmount = getPlatformCommission(amount)
+  const creatorNetAmount = Math.max(0, amount - platformCommissionAmount)
   const debitTransaction = {
     id: `purchase_${purchaseId}`,
     walletId: buyerWalletRef.id,
@@ -139,6 +152,10 @@ export async function purchaseVideoWithWallet(input: { userId: string; videoId: 
     metadata: {
       videoId: input.videoId,
       orderId: purchaseId,
+      platformCommissionPercent: PLATFORM_COMMISSION_PERCENT,
+      platformCommissionAmount,
+      grossAmount: amount,
+      creatorNetAmount,
     },
   }
 
@@ -148,6 +165,9 @@ export async function purchaseVideoWithWallet(input: { userId: string; videoId: 
     videoId: input.videoId,
     creatorId,
     amount,
+    platformCommissionPercent: PLATFORM_COMMISSION_PERCENT,
+    platformCommissionAmount,
+    creatorNetAmount,
     currency: 'USD',
     method: 'wallet',
     status: 'completed',
@@ -169,14 +189,18 @@ export async function purchaseVideoWithWallet(input: { userId: string; videoId: 
       id: `earning_${purchaseId}`,
       walletId: creatorWalletRef.id,
       type: 'earning',
-      amount,
+      amount: creatorNetAmount,
       currency: 'USD',
-      description: 'Vente de contenu payant',
+      description: 'Vente de contenu payant (net createur)',
       status: 'completed',
       createdAt: new Date(),
       metadata: {
         videoId: input.videoId,
         orderId: purchaseId,
+        platformCommissionPercent: PLATFORM_COMMISSION_PERCENT,
+        platformCommissionAmount,
+        grossAmount: amount,
+        creatorNetAmount,
       },
     }
 
@@ -184,7 +208,7 @@ export async function purchaseVideoWithWallet(input: { userId: string; videoId: 
       const creatorWallet = creatorWalletSnap.data() as any
       const creatorTransactions = Array.isArray(creatorWallet.transactions) ? creatorWallet.transactions : []
       batch.update(creatorWalletRef, {
-        balance: Number(creatorWallet.balance || 0) + amount,
+        balance: Number(creatorWallet.balance || 0) + creatorNetAmount,
         currency: 'USD',
         userId: creatorId,
         updatedAt: serverTimestamp(),
@@ -193,7 +217,7 @@ export async function purchaseVideoWithWallet(input: { userId: string; videoId: 
     } else {
       batch.set(creatorWalletRef, {
         userId: creatorId,
-        balance: amount,
+        balance: creatorNetAmount,
         currency: 'USD',
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -212,6 +236,8 @@ export async function purchaseVideoWithWallet(input: { userId: string; videoId: 
         videoId: input.videoId,
         purchaseId,
         amount,
+        platformCommissionAmount,
+        creatorNetAmount,
       },
       createdAt: serverTimestamp(),
     })

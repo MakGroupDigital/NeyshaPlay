@@ -1,13 +1,14 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Bell, Play, Plus, User as UserIcon, Wallet } from 'lucide-react'
+import { Bell, Play, Plus, ShieldCheck, User as UserIcon, Wallet } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { collection, doc, limit, onSnapshot, query, where } from 'firebase/firestore'
 import { useFirestore, useUser } from '@/firebase'
 import type { User, UserRole } from '@/lib/types'
+import { hasCreatorKycStatus, normalizeUserRole } from '@/lib/roles'
 
 export function BottomNavBar() {
   const pathname = usePathname()
@@ -15,6 +16,7 @@ export function BottomNavBar() {
   const firestore = useFirestore()
   const router = useRouter()
   const [role, setRole] = useState<UserRole | null>(null)
+  const [kycStatus, setKycStatus] = useState<User['kycStatus'] | null>(null)
   const [roleResolved, setRoleResolved] = useState(false)
   const [unreadNotifications, setUnreadNotifications] = useState(0)
 
@@ -23,23 +25,37 @@ export function BottomNavBar() {
     return doc(firestore, 'users', authUser.uid)
   }, [firestore, authUser])
 
+  const kycDocRef = useMemo(() => {
+    if (!firestore || !authUser) return null
+    return doc(firestore, 'creatorKyc', authUser.uid)
+  }, [firestore, authUser])
+
   useEffect(() => {
     if (!authUser) {
       setRole(null)
+      setKycStatus(null)
       setRoleResolved(true)
       return
     }
     if (!userDocRef) return
 
     setRoleResolved(false)
+    try {
+      setRole(normalizeUserRole(localStorage.getItem(`userRole:${authUser.uid}`)))
+    } catch {
+      // Ignore storage errors.
+    }
+
     const unsubscribe = onSnapshot(
       userDocRef,
       (snapshot) => {
-        const nextRole = snapshot.data()?.role
-        setRole(nextRole === 'creator' ? 'creator' : 'user')
+        const profile = snapshot.data()
+        const normalizedRole = normalizeUserRole(profile?.role)
+        setRole(normalizedRole)
+        setKycStatus((profile?.kycStatus as User['kycStatus']) || null)
         setRoleResolved(true)
         try {
-          localStorage.setItem(`userRole:${authUser.uid}`, nextRole === 'creator' ? 'creator' : 'user')
+          localStorage.setItem(`userRole:${authUser.uid}`, normalizedRole)
         } catch {
           // Ignore storage errors (private mode, etc.)
         }
@@ -53,7 +69,39 @@ export function BottomNavBar() {
     return () => unsubscribe()
   }, [authUser, userDocRef])
 
-  const effectiveRole = role
+  useEffect(() => {
+    if (!authUser || !kycDocRef) {
+      setKycStatus(null)
+      return
+    }
+
+    const unsubscribe = onSnapshot(
+      kycDocRef,
+      (snapshot) => {
+        if (!snapshot.exists()) return
+        const status = (snapshot.data()?.status as User['kycStatus']) || 'draft'
+        setKycStatus(status)
+      },
+      () => undefined
+    )
+
+    return () => unsubscribe()
+  }, [authUser, kycDocRef])
+
+  const hasCreatorKyc =
+    hasCreatorKycStatus(kycStatus)
+
+  const effectiveRole: UserRole | null =
+    role === 'admin' ? 'admin' : role === 'creator' || hasCreatorKyc ? 'creator' : role
+
+  useEffect(() => {
+    if (!authUser || !effectiveRole) return
+    try {
+      localStorage.setItem(`userRole:${authUser.uid}`, effectiveRole)
+    } catch {
+      // Ignore storage errors.
+    }
+  }, [authUser, effectiveRole])
 
   useEffect(() => {
     if (!firestore || !authUser) {
@@ -102,6 +150,16 @@ export function BottomNavBar() {
       return [
         { href: '/', label: 'Play', icon: Play },
         { href: '/wallet', label: 'Wallet', icon: Wallet, auth: true },
+        { href: '/profile', label: 'Profil', icon: UserIcon, auth: true },
+      ]
+    }
+
+    if (effectiveRole === 'admin') {
+      return [
+        { href: '/', label: 'Play', icon: Play },
+        { href: '/admin', label: 'Admin', icon: ShieldCheck, auth: true },
+        { href: '/wallet', label: 'Wallet', icon: Wallet, auth: true },
+        { href: '/notifications', label: 'Notif', icon: Bell, auth: true },
         { href: '/profile', label: 'Profil', icon: UserIcon, auth: true },
       ]
     }
