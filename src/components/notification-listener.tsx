@@ -3,10 +3,12 @@
 import { useEffect, useRef } from 'react'
 import { collection, limit, onSnapshot, query, where } from 'firebase/firestore'
 import { useRouter } from 'next/navigation'
-import { useFirestore, useUser } from '@/firebase'
+import { useFirebaseApp, useFirestore, useUser } from '@/firebase'
 import { useToast } from '@/hooks/use-toast'
+import { listenForegroundPush } from '@/lib/push-notifications'
 
 export function NotificationListener() {
+  const firebaseApp = useFirebaseApp()
   const firestore = useFirestore()
   const { user } = useUser()
   const { toast } = useToast()
@@ -36,6 +38,19 @@ export function NotificationListener() {
           const notification = change.doc.data()
           if (notification.read) return
 
+          if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+            const browserNotification = new Notification('NeyshaPlay', {
+              body: notification.content || 'Vous avez une nouvelle notification.',
+              icon: '/android-chrome-192x192.png',
+              badge: '/favicon-32x32.png',
+            })
+            browserNotification.onclick = () => {
+              window.focus()
+              router.push('/notifications')
+              browserNotification.close()
+            }
+          }
+
           toast({
             title: 'Nouvelle notification',
             description: notification.content || 'Vous avez une nouvelle notification.',
@@ -50,6 +65,22 @@ export function NotificationListener() {
 
     return () => unsubscribe()
   }, [firestore, router, toast, user])
+
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined
+
+    listenForegroundPush(firebaseApp, (payload) => {
+      toast({
+        title: payload.notification?.title || 'Nouvelle notification',
+        description: payload.notification?.body || payload.data?.content || 'Vous avez une nouvelle notification.',
+        onClick: () => router.push(payload.data?.url || '/notifications'),
+      } as any)
+    }).then((off) => {
+      unsubscribe = off
+    })
+
+    return () => unsubscribe?.()
+  }, [firebaseApp, router, toast])
 
   return null
 }

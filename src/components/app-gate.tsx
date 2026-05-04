@@ -9,6 +9,7 @@ import { GenderGate } from '@/components/gender-gate';
 import { AuthBootstrap } from '@/components/auth-bootstrap';
 import { KycStatusWatcher } from '@/components/kyc-status-watcher';
 import { NotificationListener } from '@/components/notification-listener';
+import { PwaInstallAssistant } from '@/components/pwa-install-assistant';
 import { useUser } from '@/firebase';
 import { usePathname, useRouter } from 'next/navigation';
 
@@ -68,6 +69,7 @@ export function AppGate({ children }: { children: React.ReactNode }) {
       <AuthBootstrap />
       <KycStatusWatcher />
       <NotificationListener />
+      <PwaInstallAssistant />
       <HomeRedirect />
       <GenderGate>
         <AppLayout>{children}</AppLayout>
