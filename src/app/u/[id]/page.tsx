@@ -136,10 +136,12 @@ export default function PublicProfilePage() {
     )
   }
 
+  const totalVideoLikes = userVideos.reduce((total, video) => total + Number(video.likes || 0), 0)
+
   const stats = [
     { label: 'Abonnements', value: userData.following, icon: UserPlus },
     { label: 'Abonnés', value: userData.followers, icon: Users },
-    { label: 'J\'aime', value: userData.likes, icon: Heart },
+    { label: 'J\'aime', value: totalVideoLikes, icon: Heart },
   ]
 
   const formatTime = (value: number) => {
@@ -299,7 +301,7 @@ export default function PublicProfilePage() {
           <div className="mb-4 text-center">
             <h2 className="text-xl font-bold font-headline">Vidéos</h2>
             <p className="text-sm text-muted-foreground">
-              Total J'aime: <ClientFormattedNumber value={userData.likes || 0} />
+              Total J'aime: <ClientFormattedNumber value={totalVideoLikes} />
             </p>
           </div>
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-1">
