@@ -3,12 +3,10 @@
 import { useEffect, useRef } from 'react'
 import { collection, limit, onSnapshot, query, where } from 'firebase/firestore'
 import { useRouter } from 'next/navigation'
-import { useFirebaseApp, useFirestore, useUser } from '@/firebase'
+import { useFirestore, useUser } from '@/firebase'
 import { useToast } from '@/hooks/use-toast'
-import { listenForegroundPush } from '@/lib/push-notifications'
 
 export function NotificationListener() {
-  const firebaseApp = useFirebaseApp()
   const firestore = useFirestore()
   const { user } = useUser()
   const { toast } = useToast()
@@ -65,22 +63,6 @@ export function NotificationListener() {
 
     return () => unsubscribe()
   }, [firestore, router, toast, user])
-
-  useEffect(() => {
-    let unsubscribe: (() => void) | undefined
-
-    listenForegroundPush(firebaseApp, (payload) => {
-      toast({
-        title: payload.notification?.title || 'Nouvelle notification',
-        description: payload.notification?.body || payload.data?.content || 'Vous avez une nouvelle notification.',
-        onClick: () => router.push(payload.data?.url || '/notifications'),
-      } as any)
-    }).then((off) => {
-      unsubscribe = off
-    })
-
-    return () => unsubscribe?.()
-  }, [firebaseApp, router, toast])
 
   return null
 }

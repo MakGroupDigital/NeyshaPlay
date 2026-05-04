@@ -174,35 +174,34 @@ Permettre de suivre/ne plus suivre des créateurs avec mise à jour des compteur
 
 ---
 
-#### 1.5 Notifications Push
+#### 1.5 Notifications In-App
 
-**Statut**: 🔴 Non commencé
+**Statut**: 🟢 Implémenté
 
 **Priorité**: Moyenne
 
 **Description**: 
-Envoyer des notifications pour les likes, commentaires, nouveaux followers.
+Envoyer des notifications internes via Firebase/Firestore pour les likes, commentaires, nouveaux followers.
 
 **Fichiers concernés**:
-- `src/app/inbox/page.tsx`
-- `src/firebase/notifications.ts` (à créer)
-- `public/firebase-messaging-sw.js` (à créer)
+- `src/app/notifications/page.tsx`
+- `src/components/notification-listener.tsx`
+- `src/components/layout/*nav*.tsx`
 
 **Dépendances**:
-- Firebase Cloud Messaging
-- Service Worker
+- Firebase Firestore realtime listeners
 
 **Étapes d'implémentation**:
-1. Configurer Firebase Cloud Messaging
-2. Créer le service worker
-3. Demander la permission de notifications
-4. Implémenter l'envoi de notifications
-5. Gérer la réception et l'affichage
+1. Créer les documents de notification dans Firestore
+2. Écouter les notifications en temps réel côté client
+3. Afficher les popups internes
+4. Marquer les notifications non lues dans la navigation
+5. Gérer la page de consultation des notifications
 
 **Tests à effectuer**:
-- [ ] Permission demandée correctement
-- [ ] Notifications reçues en arrière-plan
-- [ ] Notifications reçues au premier plan
+- [ ] Popup affichée à la réception
+- [ ] Badge rouge affiché quand une notification est non lue
+- [ ] Page notifications synchronisée en temps réel
 - [ ] Clic sur notification redirige correctement
 
 ---
