@@ -1,17 +1,12 @@
-import Link from 'next/link'
-import { Button } from '@/components/ui/button'
+import { AppErrorState } from '@/components/app-error-state'
 
 export default function NotFound() {
   return (
-    <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-4 px-4 text-center">
-      <h1 className="text-6xl font-bold font-headline text-primary">404</h1>
-      <h2 className="text-2xl font-semibold">Page introuvable</h2>
-      <p className="text-muted-foreground max-w-md">
-        Désolé, la page que vous recherchez n'existe pas ou a été déplacée.
-      </p>
-      <Button asChild className="mt-4">
-        <Link href="/">Retour à l'accueil</Link>
-      </Button>
-    </div>
+    <AppErrorState
+      code="404"
+      title="Page introuvable"
+      description="La page demandée n’existe pas, a été déplacée ou n’est plus disponible. Vous pouvez revenir en arrière, actualiser ou retourner à l’accueil."
+      variant="not-found"
+    />
   )
 }
