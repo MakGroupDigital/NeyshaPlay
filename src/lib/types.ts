@@ -16,6 +16,7 @@ export type User = {
   createdAt: Timestamp
   gender?: 'female' | 'male'
   feedGender?: 'female' | 'male' | 'all'
+  feedGenderLocked?: boolean
   country?: string
   city?: string
   birthDate?: string

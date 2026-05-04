@@ -54,9 +54,9 @@ export function RoleSelection({ onRoleSelect, isLoading }: RoleSelectionProps) {
   ]
 
   const feedPreferences = [
-    { value: 'female' as const, title: 'Créatrices', description: 'Voir principalement du contenu de créatrices', color: 'pink' },
-    { value: 'male' as const, title: 'Créateurs', description: 'Voir principalement du contenu de créateurs', color: 'blue' },
-    { value: 'all' as const, title: 'Tous', description: 'Voir du contenu de tous les créateurs', color: 'primary' }
+    { value: 'female' as const, title: 'Contenus de créatrices', description: 'Voir principalement des vidéos publiées par des créatrices', color: 'pink' },
+    { value: 'male' as const, title: 'Contenus de créateurs', description: 'Voir principalement des vidéos publiées par des créateurs', color: 'blue' },
+    { value: 'all' as const, title: 'Tous les contenus', description: 'Voir des vidéos de tous les créateurs', color: 'primary' }
   ]
 
   const handleRoleContinue = () => {
@@ -73,6 +73,11 @@ export function RoleSelection({ onRoleSelect, isLoading }: RoleSelectionProps) {
 
   const handleConfirm = () => {
     if (selectedRole && selectedGender && selectedFeedGender) {
+      try {
+        localStorage.setItem('feedGenderChosen', 'true')
+      } catch {
+        // ignore
+      }
       onRoleSelect(selectedRole, selectedGender, selectedFeedGender)
     }
   }
@@ -100,12 +105,12 @@ export function RoleSelection({ onRoleSelect, isLoading }: RoleSelectionProps) {
           <h1 className="text-3xl md:text-4xl font-bold font-headline">
             {step === 'role' && 'Choisissez votre compte'}
             {step === 'gender' && 'Votre sexe'}
-            {step === 'feed' && 'Contenu préféré'}
+            {step === 'feed' && 'Choisissez le type de contenu que vous souhaitez voir'}
           </h1>
           <p className="mt-2 text-sm md:text-base text-muted-foreground">
             {step === 'role' && 'Une seule étape avant de profiter de NeyshaPlay.'}
             {step === 'gender' && 'Cette information nous aide à personnaliser votre expérience'}
-            {step === 'feed' && 'Quel type de créateurs souhaitez-vous voir en priorité?'}
+            {step === 'feed' && 'Ce choix concerne votre fil vidéo, pas votre identité personnelle. Une fois validé, il ne sera plus redemandé.'}
           </p>
         </div>
 
@@ -304,7 +309,9 @@ export function RoleSelection({ onRoleSelect, isLoading }: RoleSelectionProps) {
 
         {step !== 'role' && (
           <p className="mt-4 text-xs text-muted-foreground text-center">
-            Vous pourrez modifier ces choix plus tard dans votre profil.
+            {step === 'feed'
+              ? 'Cette préférence est définitive pour l’écran de démarrage et ne réapparaîtra plus après validation.'
+              : 'Ces informations pourront être complétées dans vos réglages.'}
           </p>
         )}
       </div>

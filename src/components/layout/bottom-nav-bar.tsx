@@ -5,8 +5,8 @@ import { Bell, Play, Plus, User as UserIcon, Wallet } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import { doc } from 'firebase/firestore'
-import { useDoc, useFirestore, useUser } from '@/firebase'
+import { doc, onSnapshot } from 'firebase/firestore'
+import { useFirestore, useUser } from '@/firebase'
 import type { User, UserRole } from '@/lib/types'
 
 export function BottomNavBar() {
@@ -14,41 +14,45 @@ export function BottomNavBar() {
   const { user: authUser, loading } = useUser()
   const firestore = useFirestore()
   const router = useRouter()
-  const [cachedRole, setCachedRole] = useState<UserRole | null>(null)
+  const [role, setRole] = useState<UserRole | null>(null)
+  const [roleResolved, setRoleResolved] = useState(false)
 
   const userDocRef = useMemo(() => {
     if (!firestore || !authUser) return null
     return doc(firestore, 'users', authUser.uid)
   }, [firestore, authUser])
 
-  const { data: profile } = useDoc<User>(userDocRef as any)
-
   useEffect(() => {
     if (!authUser) {
-      setCachedRole(null)
+      setRole(null)
+      setRoleResolved(true)
       return
     }
-    try {
-      const stored = localStorage.getItem(`userRole:${authUser.uid}`)
-      if (stored === 'user' || stored === 'creator') {
-        setCachedRole(stored as UserRole)
+    if (!userDocRef) return
+
+    setRoleResolved(false)
+    const unsubscribe = onSnapshot(
+      userDocRef,
+      (snapshot) => {
+        const nextRole = snapshot.data()?.role
+        setRole(nextRole === 'creator' ? 'creator' : 'user')
+        setRoleResolved(true)
+        try {
+          localStorage.setItem(`userRole:${authUser.uid}`, nextRole === 'creator' ? 'creator' : 'user')
+        } catch {
+          // Ignore storage errors (private mode, etc.)
+        }
+      },
+      () => {
+        setRole('user')
+        setRoleResolved(true)
       }
-    } catch {
-      // Ignore storage errors (private mode, etc.)
-    }
-  }, [authUser])
+    )
 
-  useEffect(() => {
-    if (!authUser || !profile?.role) return
-    setCachedRole(profile.role)
-    try {
-      localStorage.setItem(`userRole:${authUser.uid}`, profile.role)
-    } catch {
-      // Ignore storage errors (private mode, etc.)
-    }
-  }, [authUser, profile?.role])
+    return () => unsubscribe()
+  }, [authUser, userDocRef])
 
-  const effectiveRole = profile?.role || cachedRole
+  const effectiveRole = role
 
   const handleAuthClick = (href: string) => (e: React.MouseEvent<HTMLAnchorElement>) => {
     if (!loading && !authUser) {
@@ -61,6 +65,14 @@ export function BottomNavBar() {
   const getMenuItems = () => {
     if (!authUser) {
       // Not logged in - show basic menu
+      return [
+        { href: '/', label: 'Play', icon: Play },
+        { href: '/wallet', label: 'Wallet', icon: Wallet, auth: true },
+        { href: '/profile', label: 'Profil', icon: UserIcon, auth: true },
+      ]
+    }
+
+    if (!roleResolved) {
       return [
         { href: '/', label: 'Play', icon: Play },
         { href: '/wallet', label: 'Wallet', icon: Wallet, auth: true },

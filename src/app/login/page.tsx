@@ -59,6 +59,7 @@ export default function LoginPage() {
         role: role,
         gender: gender,
         feedGender: feedGender,
+        feedGenderLocked: true,
         createdAt: serverTimestamp()
       }
 

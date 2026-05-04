@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { signOut } from 'firebase/auth'
-import { doc, getDoc, setDoc } from 'firebase/firestore'
+import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore'
 import { useAuth, useFirestore, useUser } from '@/firebase'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -16,6 +16,70 @@ import { Separator } from '@/components/ui/separator'
 import { useToast } from '@/hooks/use-toast'
 import { ArrowLeft, Bell, Shield, Video, Wallet, User2, LogOut, Key, Globe, Palette, UserX, Sparkles } from 'lucide-react'
 import type { User } from '@/lib/types'
+
+const creatorCountriesByRegion = [
+  {
+    label: 'RDC',
+    countries: ['République démocratique du Congo'],
+  },
+  {
+    label: 'Afrique',
+    countries: [
+      'Afrique du Sud',
+      'Algérie',
+      'Angola',
+      'Bénin',
+      'Burundi',
+      'Cameroun',
+      'Congo-Brazzaville',
+      "Côte d'Ivoire",
+      'Égypte',
+      'Gabon',
+      'Ghana',
+      'Kenya',
+      'Maroc',
+      'Nigeria',
+      'Ouganda',
+      'Rwanda',
+      'Sénégal',
+      'Tanzanie',
+      'Tunisie',
+      'Zambie',
+    ],
+  },
+  {
+    label: 'Europe',
+    countries: ['Allemagne', 'Belgique', 'Espagne', 'France', 'Italie', 'Portugal', 'Royaume-Uni', 'Suisse'],
+  },
+  {
+    label: 'Amérique',
+    countries: ['Brésil', 'Canada', 'États-Unis', 'Mexique'],
+  },
+]
+
+const creatorCitiesByCountry: Record<string, string[]> = {
+  'République démocratique du Congo': ['Kinshasa', 'Lubumbashi', 'Goma', 'Bukavu', 'Kisangani', 'Mbuji-Mayi', 'Matadi', 'Kolwezi'],
+  Cameroun: ['Douala', 'Yaoundé', 'Bafoussam'],
+  "Côte d'Ivoire": ['Abidjan', 'Yamoussoukro', 'Bouaké'],
+  Ghana: ['Accra', 'Kumasi', 'Tamale'],
+  Kenya: ['Nairobi', 'Mombasa', 'Kisumu'],
+  Maroc: ['Casablanca', 'Rabat', 'Marrakech'],
+  Nigeria: ['Lagos', 'Abuja', 'Kano'],
+  Rwanda: ['Kigali', 'Butare', 'Gisenyi'],
+  Sénégal: ['Dakar', 'Thiès', 'Saint-Louis'],
+  'Afrique du Sud': ['Johannesburg', 'Le Cap', 'Durban'],
+  France: ['Paris', 'Lyon', 'Marseille'],
+  Belgique: ['Bruxelles', 'Anvers', 'Liège'],
+  Allemagne: ['Berlin', 'Hambourg', 'Munich'],
+  Espagne: ['Madrid', 'Barcelone', 'Valence'],
+  Italie: ['Rome', 'Milan', 'Naples'],
+  Canada: ['Montréal', 'Toronto', 'Ottawa'],
+  'États-Unis': ['New York', 'Washington', 'Los Angeles'],
+  Brésil: ['São Paulo', 'Rio de Janeiro', 'Brasília'],
+  Mexique: ['Mexico', 'Guadalajara', 'Monterrey'],
+}
+
+const getCreatorCities = (country?: string) => country ? creatorCitiesByCountry[country] || ['Capitale', 'Ville principale', 'Autre'] : []
 
 type NotificationSettings = {
   likes: boolean
@@ -139,6 +203,7 @@ export default function SettingsPage() {
   const [profile, setProfile] = useState<User | null>(null)
   const [settings, setSettings] = useState<UserSettings>(defaultSettings)
   const [blockedInput, setBlockedInput] = useState('')
+  const [isBecomingCreator, setIsBecomingCreator] = useState(false)
 
   useEffect(() => {
     if (!userLoading && !authUser) {
@@ -222,6 +287,8 @@ export default function SettingsPage() {
           username: profile.username,
           bio: profile.bio,
           gender: profile.gender,
+          country: profile.country || '',
+          city: profile.city || '',
           settings,
         },
         { merge: true }
@@ -238,6 +305,53 @@ export default function SettingsPage() {
       })
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  const handleBecomeCreator = async () => {
+    if (!firestore || !authUser || !profile) return
+    if (!profile.gender || !profile.country || !profile.city) {
+      toast({
+        title: 'Informations requises',
+        description: 'Renseignez votre sexe, pays et ville pour devenir créateur.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    setIsBecomingCreator(true)
+    try {
+      await setDoc(
+        doc(firestore, 'users', authUser.uid),
+        {
+          role: 'creator',
+          gender: profile.gender,
+          country: profile.country,
+          city: profile.city,
+          settings,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      )
+      setProfile((prev) => prev ? { ...prev, role: 'creator' } : prev)
+      try {
+        localStorage.setItem(`userRole:${authUser.uid}`, 'creator')
+      } catch {
+        // ignore
+      }
+      toast({
+        title: 'Compte créateur activé',
+        description: 'Vous pouvez maintenant publier et configurer vos revenus.',
+      })
+    } catch (error) {
+      console.error('Become creator failed:', error)
+      toast({
+        title: 'Erreur',
+        description: 'Impossible d’activer le compte créateur.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsBecomingCreator(false)
     }
   }
 
@@ -343,6 +457,45 @@ export default function SettingsPage() {
             </select>
           </div>
           <div className="grid gap-2">
+            <Label>Pays</Label>
+            <select
+              className="h-11 rounded-md border border-input bg-background px-3 text-sm"
+              value={profile.country ?? ''}
+              onChange={(e) =>
+                setProfile((prev) =>
+                  prev && { ...prev, country: e.target.value, city: '' }
+                )
+              }
+            >
+              <option value="">Sélectionner</option>
+              {creatorCountriesByRegion.map((group) => (
+                <optgroup key={group.label} label={group.label}>
+                  {group.countries.map((country) => (
+                    <option key={country} value={country}>{country}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </div>
+          <div className="grid gap-2">
+            <Label>Ville</Label>
+            <select
+              className="h-11 rounded-md border border-input bg-background px-3 text-sm"
+              value={profile.city ?? ''}
+              disabled={!profile.country}
+              onChange={(e) =>
+                setProfile((prev) =>
+                  prev && { ...prev, city: e.target.value }
+                )
+              }
+            >
+              <option value="">Sélectionner</option>
+              {getCreatorCities(profile.country).map((city) => (
+                <option key={city} value={city}>{city}</option>
+              ))}
+            </select>
+          </div>
+          <div className="grid gap-2">
             <Label>Bio</Label>
             <Textarea
               value={profile.bio}
@@ -351,6 +504,94 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {!isCreator && (
+        <Card className="border-white/10 bg-card">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Video className="h-5 w-5 text-primary" />
+              Devenir créateur
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="rounded-xl border border-primary/15 bg-primary/5 p-3 text-sm text-muted-foreground">
+              Renseignez les informations nécessaires pour activer votre compte créateur. La confirmation d’identité sera demandée avant les retraits.
+            </div>
+            <div className="grid gap-2">
+              <Label>Sexe</Label>
+              <select
+                className="h-11 rounded-md border border-input bg-background px-3 text-sm"
+                value={profile.gender ?? ''}
+                onChange={(e) =>
+                  setProfile((prev) =>
+                    prev && { ...prev, gender: e.target.value as 'female' | 'male' }
+                  )
+                }
+              >
+                <option value="">Sélectionner</option>
+                <option value="female">Femme</option>
+                <option value="male">Homme</option>
+              </select>
+            </div>
+            <div className="grid gap-2">
+              <Label>Pays</Label>
+              <select
+                className="h-11 rounded-md border border-input bg-background px-3 text-sm"
+                value={profile.country ?? ''}
+                onChange={(e) =>
+                  setProfile((prev) =>
+                    prev && { ...prev, country: e.target.value, city: '' }
+                  )
+                }
+              >
+                <option value="">Sélectionner</option>
+                {creatorCountriesByRegion.map((group) => (
+                  <optgroup key={group.label} label={group.label}>
+                    {group.countries.map((country) => (
+                      <option key={country} value={country}>{country}</option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+            <div className="grid gap-2">
+              <Label>Ville</Label>
+              <select
+                className="h-11 rounded-md border border-input bg-background px-3 text-sm"
+                value={profile.city ?? ''}
+                disabled={!profile.country}
+                onChange={(e) =>
+                  setProfile((prev) =>
+                    prev && { ...prev, city: e.target.value }
+                  )
+                }
+              >
+                <option value="">Sélectionner</option>
+                {getCreatorCities(profile.country).map((city) => (
+                  <option key={city} value={city}>{city}</option>
+                ))}
+              </select>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <p className="text-xs text-muted-foreground">Sexe</p>
+                <p className="text-sm font-medium">{profile.gender === 'female' ? 'Femme' : profile.gender === 'male' ? 'Homme' : 'À renseigner'}</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <p className="text-xs text-muted-foreground">Pays</p>
+                <p className="text-sm font-medium">{profile.country || 'À renseigner'}</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <p className="text-xs text-muted-foreground">Ville</p>
+                <p className="text-sm font-medium">{profile.city || 'À renseigner'}</p>
+              </div>
+            </div>
+            <Button className="w-full" onClick={handleBecomeCreator} disabled={isBecomingCreator}>
+              {isBecomingCreator ? 'Activation...' : 'Devenir créateur'}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="border-white/10 bg-card">
         <CardHeader className="pb-3">
