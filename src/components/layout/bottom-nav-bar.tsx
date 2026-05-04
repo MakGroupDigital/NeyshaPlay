@@ -5,7 +5,7 @@ import { Bell, Play, Plus, User as UserIcon, Wallet } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import { doc, onSnapshot } from 'firebase/firestore'
+import { collection, doc, limit, onSnapshot, query, where } from 'firebase/firestore'
 import { useFirestore, useUser } from '@/firebase'
 import type { User, UserRole } from '@/lib/types'
 
@@ -16,6 +16,7 @@ export function BottomNavBar() {
   const router = useRouter()
   const [role, setRole] = useState<UserRole | null>(null)
   const [roleResolved, setRoleResolved] = useState(false)
+  const [unreadNotifications, setUnreadNotifications] = useState(0)
 
   const userDocRef = useMemo(() => {
     if (!firestore || !authUser) return null
@@ -53,6 +54,31 @@ export function BottomNavBar() {
   }, [authUser, userDocRef])
 
   const effectiveRole = role
+
+  useEffect(() => {
+    if (!firestore || !authUser) {
+      setUnreadNotifications(0)
+      return
+    }
+
+    const notificationsQuery = query(
+      collection(firestore, 'notifications'),
+      where('recipientId', '==', authUser.uid),
+      limit(80)
+    )
+
+    const unsubscribe = onSnapshot(
+      notificationsQuery,
+      (snapshot) => {
+        setUnreadNotifications(
+          snapshot.docs.filter((docSnap) => !docSnap.data()?.read).length
+        )
+      },
+      () => setUnreadNotifications(0)
+    )
+
+    return () => unsubscribe()
+  }, [authUser, firestore])
 
   const handleAuthClick = (href: string) => (e: React.MouseEvent<HTMLAnchorElement>) => {
     if (!loading && !authUser) {
@@ -150,7 +176,12 @@ export function BottomNavBar() {
                           isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
                         )}
                       >
-                        <item.icon className="h-5 w-5" />
+                        <span className="relative">
+                          <item.icon className="h-5 w-5" />
+                          {item.href === '/notifications' && unreadNotifications > 0 && (
+                            <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-background" />
+                          )}
+                        </span>
                         <span className={cn(isActive && 'text-primary')}>{item.label}</span>
                       </div>
                     </Link>
@@ -172,7 +203,12 @@ export function BottomNavBar() {
                           isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
                         )}
                       >
-                        <item.icon className="h-5 w-5" />
+                        <span className="relative">
+                          <item.icon className="h-5 w-5" />
+                          {item.href === '/notifications' && unreadNotifications > 0 && (
+                            <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-background" />
+                          )}
+                        </span>
                         <span className={cn(isActive && 'text-primary')}>{item.label}</span>
                       </div>
                     </Link>
@@ -193,7 +229,12 @@ export function BottomNavBar() {
                         isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
                       )}
                     >
-                      <item.icon className="h-6 w-6" />
+                      <span className="relative">
+                        <item.icon className="h-6 w-6" />
+                        {item.href === '/notifications' && unreadNotifications > 0 && (
+                          <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-background" />
+                        )}
+                      </span>
                       <span className={cn(isActive && 'text-primary')}>{item.label}</span>
                     </div>
                   </Link>
