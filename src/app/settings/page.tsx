@@ -17,6 +17,7 @@ import { useToast } from '@/hooks/use-toast'
 import { ArrowLeft, Bell, Shield, Video, Wallet, User2, LogOut, Key, Globe, Palette, UserX, Sparkles } from 'lucide-react'
 import type { User } from '@/lib/types'
 import { hasCreatorAccess } from '@/lib/roles'
+import { buildUniqueUsername, isEmailDerivedUsername, normalizeUsername, usernameFromName } from '@/lib/usernames'
 
 const creatorCountriesByRegion = [
   {
@@ -287,11 +288,17 @@ export default function SettingsPage() {
     }
     setIsSaving(true)
     try {
+      const name = profile.name?.trim() || authUser.displayName || `user_${authUser.uid.slice(0, 5)}`
+      let username = `@${normalizeUsername(profile.username || '')}`
+      if (username === '@' || isEmailDerivedUsername(username, profile.email || authUser.email)) {
+        username = usernameFromName(name, authUser.uid)
+      }
+      username = await buildUniqueUsername(firestore, username.replace(/^@/, '') || name, authUser.uid)
       await setDoc(
         doc(firestore, 'users', authUser.uid),
         {
-          name: profile.name,
-          username: profile.username,
+          name,
+          username,
           bio: profile.bio,
           gender: profile.gender,
           country: profile.country || '',

@@ -15,6 +15,7 @@ import type { User, Video } from '@/lib/types'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { createAppNotification } from '@/lib/notifications'
 import { isAdminRole } from '@/lib/roles'
+import { usernameFromName } from '@/lib/usernames'
 
 export default function PublicProfilePage() {
   const params = useParams()
@@ -264,14 +265,15 @@ export default function PublicProfilePage() {
       if (nextFollowing) {
         const actorSnap = await getDoc(followerRef)
         const actorData = actorSnap.exists() ? ({ id: actorSnap.id, ...actorSnap.data() } as User) : null
+        const fallbackActorName = authUser.displayName || 'Utilisateur'
         await createAppNotification(firestore, {
           recipientId: userData.id,
           actorId: authUser.uid,
           actor: actorData
             ? { name: actorData.name, username: actorData.username, avatarUrl: actorData.avatarUrl }
-            : { name: authUser.displayName || 'Utilisateur', username: authUser.email || '', avatarUrl: authUser.photoURL || '' },
+            : { name: fallbackActorName, username: usernameFromName(fallbackActorName, authUser.uid), avatarUrl: authUser.photoURL || '' },
           type: 'follow',
-          content: `${actorData?.username || authUser.displayName || 'Un utilisateur'} vous suit maintenant.`,
+          content: `${actorData?.name || fallbackActorName} vous suit maintenant.`,
         })
       }
     } finally {

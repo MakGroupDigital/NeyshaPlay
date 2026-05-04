@@ -28,6 +28,7 @@ import {
   updateDoc,
 } from 'firebase/firestore'
 import { createAppNotification } from '@/lib/notifications'
+import { usernameFromName } from '@/lib/usernames'
 
 type PendingStatus = 'pending' | 'failed' | 'completed' | undefined
 type UnlockResult = { status: 'unlocked' } | { status: 'insufficient'; balance: number; amount: number }
@@ -161,15 +162,16 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
       }
       if (newLikedState && creatorId && creatorId !== authUser.uid) {
         const actorSnap = await getDoc(doc(firestore, 'users', authUser.uid)).catch(() => null)
+        const fallbackActorName = authUser.displayName || 'Utilisateur'
         const actor = actorSnap?.exists()
           ? (actorSnap.data() as any)
-          : { name: authUser.displayName || 'Utilisateur', username: authUser.email || '', avatarUrl: authUser.photoURL || '' }
+          : { name: fallbackActorName, username: usernameFromName(fallbackActorName, authUser.uid), avatarUrl: authUser.photoURL || '' }
         await createAppNotification(firestore, {
           recipientId: creatorId,
           actorId: authUser.uid,
           actor: {
             name: actor.name || 'Utilisateur',
-            username: actor.username || authUser.email || '',
+            username: actor.username || usernameFromName(actor.name || fallbackActorName, authUser.uid),
             avatarUrl: actor.avatarUrl || authUser.photoURL || '',
           },
           type: 'like',
@@ -265,7 +267,7 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
     const newComment: Omit<VideoComment, 'id'> = {
       text,
       userId: authUser.uid,
-      username: authUser.displayName || authUser.email?.split('@')[0] || 'Utilisateur',
+      username: authUser.displayName || usernameFromName('Utilisateur', authUser.uid),
       avatarUrl: authUser.photoURL || '',
       createdAt: new Date(),
     }

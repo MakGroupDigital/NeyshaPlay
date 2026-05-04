@@ -16,6 +16,13 @@ import { Settings, UserPlus, Users, Heart, X, Play, Pause, Volume2, VolumeX, Sha
 import { useToast } from '@/hooks/use-toast'
 import { uploadImageToCloudinary } from '@/lib/cloudinary'
 import { hasCreatorAccess, isAdminRole } from '@/lib/roles'
+import {
+  buildUniqueUsername,
+  isEmailDerivedUsername,
+  isUsernameAvailable as checkUsernameAvailable,
+  normalizeUsername,
+  usernameFromName,
+} from '@/lib/usernames'
 
 const countriesByRegion = [
   {
@@ -323,7 +330,10 @@ export default function ProfilePage() {
   }
 
   const displayName = userData.name || user.displayName || userData.username || 'Utilisateur'
-  const displayUsername = userData.username || (user.email ? `@${user.email.split('@')[0]}` : '@utilisateur')
+  const displayUsername =
+    userData.username && !isEmailDerivedUsername(userData.username, userData.email || user.email)
+      ? userData.username
+      : usernameFromName(displayName, user.uid)
   const displayBio = userData.bio || ''
   const displayAvatar = userData.avatarUrl || user.photoURL || ''
   const displayInitial = displayName.trim().charAt(0).toUpperCase() || 'U'
@@ -374,14 +384,7 @@ export default function ProfilePage() {
     setShowEditProfileDialog(true)
   }
 
-  const slugifyUsername = (value: string) =>
-    value
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/[^a-z0-9._]+/g, '')
-      .replace(/^[._]+|[._]+$/g, '')
-      .slice(0, 24)
+  const slugifyUsername = normalizeUsername
 
   const handleProfileNameChange = (value: string) => {
     setEditProfileName(value)
@@ -393,13 +396,7 @@ export default function ProfilePage() {
   const isUsernameAvailable = async (username: string) => {
     if (!firestore || !user) return false
     if (username === userData?.username) return true
-
-    const usernameQuery = query(
-      collection(firestore, 'users'),
-      where('username', '==', username)
-    )
-    const snapshot = await getDocs(usernameQuery)
-    return snapshot.docs.every((docSnap) => docSnap.id === user.uid)
+    return checkUsernameAvailable(firestore, username, user.uid)
   }
 
   const handleAvatarFile = (file?: File) => {
@@ -527,7 +524,10 @@ export default function ProfilePage() {
   const handleSaveProfile = async () => {
     if (!firestore || !user || !userData) return
     const name = editProfileName.trim()
-    const usernameBase = editProfileUsername.trim().replace(/^@/, '').replace(/\s+/g, '')
+    let usernameBase = normalizeUsername(editProfileUsername)
+    if (!usernameBase || isEmailDerivedUsername(`@${usernameBase}`, userData.email || user.email)) {
+      usernameBase = usernameFromName(name, user.uid).replace(/^@/, '')
+    }
 
     if (!name || !usernameBase || !editProfileGender || !editProfileCountry || !editProfileCity || !editProfileBirthDate) {
       toast({
@@ -557,15 +557,10 @@ export default function ProfilePage() {
         avatarUrl = upload.secure_url
       }
 
-      const username = `@${usernameBase}`
+      let username = `@${usernameBase}`
       const available = await isUsernameAvailable(username)
       if (!available) {
-        toast({
-          title: 'Nom utilisateur indisponible',
-          description: 'Ce nom utilisateur est deja utilise. Essayez une autre variante.',
-          variant: 'destructive',
-        })
-        return
+        username = await buildUniqueUsername(firestore, name, user.uid)
       }
 
       const userDocRef = doc(firestore, 'users', user.uid)

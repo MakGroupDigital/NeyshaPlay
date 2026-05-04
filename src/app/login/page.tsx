@@ -11,6 +11,7 @@ import { useFirestore } from '@/firebase'
 import Image from 'next/image'
 import type { UserRole } from '@/lib/types'
 import { RoleSelection } from '@/components/role-selection'
+import { usernameFromName } from '@/lib/usernames'
 
 function GoogleIcon() {
   return (
@@ -47,9 +48,13 @@ export default function LoginPage() {
     try {
       const userDocRef = doc(firestore, 'users', user.uid)
       
+      const emailLocalPart = user.email?.split('@')[0] || ''
+      const name = user.displayName && user.displayName !== emailLocalPart
+        ? user.displayName
+        : `user_${user.uid.substring(0, 5)}`
       const newUser = {
-        name: user.displayName || user.email?.split('@')[0] || `user_${user.uid.substring(0, 5)}`,
-        username: `@${user.email?.split('@')[0] || `user_${user.uid.substring(0, 5)}`}`,
+        name,
+        username: usernameFromName(name, user.uid),
         email: user.email,
         avatarUrl: user.photoURL || '',
         bio: role === 'creator' ? 'Créateur de contenu sur NeyshaPlay' : 'Nouveau sur NeyshaPlay',
