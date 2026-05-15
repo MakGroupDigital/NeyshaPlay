@@ -19,7 +19,7 @@ function signCloudinaryParams(params: Record<string, string | number>) {
     .digest('hex')
 }
 
-export async function POST() {
+export async function POST(request: Request) {
   if (!cloudName || !apiKey || !apiSecret) {
     return NextResponse.json(
       { error: 'Configuration Cloudinary serveur incomplete' },
@@ -28,7 +28,10 @@ export async function POST() {
   }
 
   const timestamp = Math.round(Date.now() / 1000)
-  const folder = 'profile-avatars'
+  const body = await request.json().catch(() => ({}))
+  const folder = typeof body?.folder === 'string' && body.folder.trim()
+    ? body.folder.trim().replace(/[^a-zA-Z0-9/_-]/g, '')
+    : 'profile-avatars'
   const signature = signCloudinaryParams({ folder, timestamp })
 
   return NextResponse.json({

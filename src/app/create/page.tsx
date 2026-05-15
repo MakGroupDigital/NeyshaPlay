@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { useToast } from '@/hooks/use-toast'
-import { X, Music, RefreshCw, Zap, Sparkles, Timer, Flashlight, Wand2, Send, RotateCcw, ArrowRight, Loader2, Upload } from 'lucide-react'
+import { X, Music, RefreshCw, Zap, Sparkles, Timer, Flashlight, Wand2, Send, RotateCcw, ArrowRight, Loader2, Upload, Image as ImageIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Slider } from '@/components/ui/slider'
 import { Progress } from '@/components/ui/progress'
@@ -16,9 +16,10 @@ import { Label } from '@/components/ui/label'
 import { useDoc, useUser } from '@/firebase'
 import { useFirestore } from '@/firebase/provider'
 import { addDoc, collection, doc, serverTimestamp } from 'firebase/firestore'
-import { uploadVideoToCloudinary, getVideoThumbnail } from '@/lib/cloudinary'
+import { uploadImageToCloudinary, uploadVideoToCloudinary, getVideoThumbnail } from '@/lib/cloudinary'
 import { extractTags } from '@/lib/content-search'
 import type { User } from '@/lib/types'
+import { removePublishProgress, upsertPublishProgress } from '@/lib/publish-progress'
 
 const MAX_RECORDING_SECONDS = 15
 
@@ -48,6 +49,7 @@ const filters = [
 const speeds = [1, 2, 3, 0.5, 0.3]
 
 type CameraQuality = 'hd' | '4k' | '8k'
+type MediaMode = 'video' | 'photos'
 
 const qualityPresets: Record<CameraQuality, { label: string; width: number; height: number }> = {
   hd: { label: 'HD', width: 1280, height: 720 },
@@ -131,6 +133,10 @@ export default function CreatePage() {
   const [recordedVideoUrl, setRecordedVideoUrl] = useState<string | null>(null)
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null)
   const [recordedMimeType, setRecordedMimeType] = useState<string | null>(null)
+  const [mediaMode, setMediaMode] = useState<MediaMode>('video')
+  const [photoFiles, setPhotoFiles] = useState<File[]>([])
+  const [photoPreviewUrls, setPhotoPreviewUrls] = useState<string[]>([])
+  const [activePhotoIndex, setActivePhotoIndex] = useState(0)
   const [recordingProgress, setRecordingProgress] = useState(0)
   
   const [step, setStep] = useState<'recording' | 'preview' | 'publish'>('recording')
@@ -298,6 +304,12 @@ export default function CreatePage() {
       }
     }
   }, [selectedSoundSource, selectedSoundUrl])
+
+  useEffect(() => {
+    return () => {
+      photoPreviewUrls.forEach((url) => URL.revokeObjectURL(url))
+    }
+  }, [photoPreviewUrls])
   
   const handleStopRecording = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -780,13 +792,17 @@ export default function CreatePage() {
       }
   }, [activeCameraIndex, cameras, frontCameraIndex, recordQuality, stream, toast])
 
-  const handleImportVideo = useCallback(
-    async (file: File) => {
-      if (!file) return
-      if (!file.type.startsWith('video/')) {
+  const handleImportMedia = useCallback(
+    async (files: FileList | File[]) => {
+      const selectedFiles = Array.from(files).filter(Boolean)
+      if (selectedFiles.length === 0) return
+      const imageFiles = selectedFiles.filter((file) => file.type.startsWith('image/'))
+      const videoFiles = selectedFiles.filter((file) => file.type.startsWith('video/'))
+
+      if (imageFiles.length > 0 && videoFiles.length > 0) {
         toast({
-          title: 'Fichier invalide',
-          description: 'Choisissez une video depuis votre appareil.',
+          title: 'Selection mixte',
+          description: 'Choisissez une video seule ou plusieurs photos, pas les deux en meme temps.',
           variant: 'destructive',
         })
         return
@@ -801,8 +817,43 @@ export default function CreatePage() {
         if (recordedVideoUrl?.startsWith('blob:')) {
           URL.revokeObjectURL(recordedVideoUrl)
         }
+        photoPreviewUrls.forEach((url) => URL.revokeObjectURL(url))
+
+        if (imageFiles.length > 0) {
+          const urls = imageFiles.map((file) => URL.createObjectURL(file))
+          setMediaMode('photos')
+          setPhotoFiles(imageFiles)
+          setPhotoPreviewUrls(urls)
+          setActivePhotoIndex(0)
+          setRecordedBlob(null)
+          setRecordedMimeType(null)
+          setRecordedVideoUrl(null)
+          setRecordedFilter('none')
+          setRecordingProgress(0)
+          setIsRecording(false)
+          setStep('preview')
+          toast({
+            title: imageFiles.length > 1 ? 'Photos importees' : 'Photo importee',
+            description: 'Vous pouvez previsualiser puis continuer.',
+          })
+          return
+        }
+
+        const file = videoFiles[0]
+        if (!file) {
+          toast({
+            title: 'Fichier invalide',
+            description: 'Choisissez une video ou une photo depuis votre appareil.',
+            variant: 'destructive',
+          })
+          return
+        }
 
         const url = URL.createObjectURL(file)
+        setMediaMode('video')
+        setPhotoFiles([])
+        setPhotoPreviewUrls([])
+        setActivePhotoIndex(0)
         setRecordedBlob(file)
         setRecordedMimeType(file.type || 'video/mp4')
         setRecordedVideoUrl(url)
@@ -818,7 +869,7 @@ export default function CreatePage() {
         setIsImportingVideo(false)
       }
     },
-    [recordedVideoUrl, stream, toast]
+    [photoPreviewUrls, recordedVideoUrl, stream, toast]
   )
 
   useEffect(() => {
@@ -953,6 +1004,11 @@ export default function CreatePage() {
         mediaRecorderRef.current.onstop = () => {
             const blob = new Blob(recordedChunksRef.current, { type: options })
             const url = URL.createObjectURL(blob)
+            photoPreviewUrls.forEach((previewUrl) => URL.revokeObjectURL(previewUrl))
+            setMediaMode('video')
+            setPhotoFiles([])
+            setPhotoPreviewUrls([])
+            setActivePhotoIndex(0)
             setRecordedBlob(blob)
             setRecordedMimeType(options)
             setRecordedVideoUrl(url)
@@ -1000,9 +1056,17 @@ export default function CreatePage() {
   }
   
   const handleRetake = () => {
+    if (recordedVideoUrl?.startsWith('blob:')) {
+      URL.revokeObjectURL(recordedVideoUrl)
+    }
+    photoPreviewUrls.forEach((url) => URL.revokeObjectURL(url))
     setRecordedVideoUrl(null)
     setRecordedBlob(null)
     setRecordedMimeType(null)
+    setMediaMode('video')
+    setPhotoFiles([])
+    setPhotoPreviewUrls([])
+    setActivePhotoIndex(0)
     setIsRecording(false)
     setRecordingProgress(0)
     setCaption('')
@@ -1011,7 +1075,9 @@ export default function CreatePage() {
   }
   
   const handlePost = async () => {
-    if (!firestore || !user || !recordedBlob) {
+    const hasVideo = mediaMode === 'video' && !!recordedBlob
+    const hasPhotos = mediaMode === 'photos' && photoFiles.length > 0
+    if (!firestore || !user || (!hasVideo && !hasPhotos)) {
         toast({
             title: 'Erreur',
             description: 'Impossible de publier.',
@@ -1042,41 +1108,129 @@ export default function CreatePage() {
     setIsPublishing(true)
     setUploadProgress(0)
 
-    // Optimistic UI: Create temporary video entry and redirect immediately
-    const tempVideoId = `temp_${Date.now()}`
+    const publishId = `publish_${Date.now()}`
     const userDocRef = doc(firestore, 'users', user.uid)
+    const title = mediaMode === 'photos' ? 'Publication photos' : 'Publication video'
+    upsertPublishProgress({
+      id: publishId,
+      title,
+      progress: 0,
+      status: 'uploading',
+      message: 'Preparation...',
+    })
     
     toast({
         title: 'Publication en cours...',
-        description: 'Votre vidéo est en cours de téléversement. Vous pouvez continuer à naviguer.',
+        description: 'Votre contenu est en cours de televersement. Vous pouvez continuer a naviguer.',
     })
     
-    // Redirect immediately
     router.push('/')
 
     try {
-      // Upload to Cloudinary in background
-      const cloudinaryResponse = await uploadVideoToCloudinary(
-        recordedBlob,
-        (progress) => setUploadProgress(progress)
-      )
+      let primaryUrl = ''
+      let thumbnailUrl = ''
+      let cloudinaryPublicId = ''
+      let mediaItems: Array<{
+        type: 'video' | 'image'
+        url: string
+        thumbnailUrl?: string
+        publicId?: string
+        width?: number
+        height?: number
+        duration?: number
+      }> = []
 
-      const thumbnailUrl = getVideoThumbnail(cloudinaryResponse.public_id)
+      if (mediaMode === 'photos') {
+        const uploadedPhotos = []
+        for (let index = 0; index < photoFiles.length; index += 1) {
+          const file = photoFiles[index]
+          const itemBaseProgress = (index / photoFiles.length) * 92
+          const itemWeight = 92 / photoFiles.length
+          const response = await uploadImageToCloudinary(
+            file,
+            (progress) => {
+              const next = itemBaseProgress + (progress / 100) * itemWeight
+              setUploadProgress(next)
+              upsertPublishProgress({
+                id: publishId,
+                title,
+                progress: next,
+                status: 'uploading',
+                message: `Photo ${index + 1}/${photoFiles.length}`,
+              })
+            },
+            'posts/photos'
+          )
+          uploadedPhotos.push(response)
+        }
 
-      // Create video document in Firestore
+        mediaItems = uploadedPhotos.map((item) => ({
+          type: 'image' as const,
+          url: item.secure_url,
+          thumbnailUrl: item.secure_url,
+          publicId: item.public_id,
+          width: item.width,
+          height: item.height,
+        }))
+        primaryUrl = mediaItems[0]?.url || ''
+        thumbnailUrl = mediaItems[0]?.thumbnailUrl || primaryUrl
+        cloudinaryPublicId = mediaItems[0]?.publicId || ''
+      } else {
+        const cloudinaryResponse = await uploadVideoToCloudinary(
+          recordedBlob!,
+          (progress) => {
+            setUploadProgress(progress)
+            upsertPublishProgress({
+              id: publishId,
+              title,
+              progress: Math.min(92, progress),
+              status: 'uploading',
+              message: `${Math.round(progress)}%`,
+            })
+          },
+          'videos'
+        )
+
+        thumbnailUrl = getVideoThumbnail(cloudinaryResponse.public_id)
+        primaryUrl = cloudinaryResponse.secure_url
+        cloudinaryPublicId = cloudinaryResponse.public_id
+        mediaItems = [
+          {
+            type: 'video',
+            url: cloudinaryResponse.secure_url,
+            thumbnailUrl,
+            publicId: cloudinaryResponse.public_id,
+            width: cloudinaryResponse.width,
+            height: cloudinaryResponse.height,
+            duration: cloudinaryResponse.duration,
+          },
+        ]
+      }
+
+      upsertPublishProgress({
+        id: publishId,
+        title,
+        progress: 96,
+        status: 'processing',
+        message: 'Finalisation...',
+      })
+
       const newVideo = {
         userRef: userDocRef,
-        videoUrl: cloudinaryResponse.secure_url,
-        thumbnailUrl: thumbnailUrl,
-        description: caption || 'Nouvelle vidéo',
-        song: selectedSoundTitle || 'Son original',
+        mediaType: mediaMode,
+        mediaItems,
+        imageUrls: mediaMode === 'photos' ? mediaItems.map((item) => item.url) : [],
+        videoUrl: primaryUrl,
+        thumbnailUrl,
+        description: caption || (mediaMode === 'photos' ? 'Nouvelle publication' : 'Nouvelle vidéo'),
+        song: mediaMode === 'photos' ? '' : selectedSoundTitle || 'Son original',
         likes: 0,
         comments: 0,
         shares: 0,
         views: 0,
         createdAt: serverTimestamp(),
-        filter: recordedFilter,
-        cloudinaryPublicId: cloudinaryResponse.public_id,
+        filter: mediaMode === 'video' ? recordedFilter : 'none',
+        cloudinaryPublicId,
         isPaid: isPaidContent,
         price: isPaidContent ? parsedPrice : 0,
         currency: isPaidContent ? currency : 'USD',
@@ -1085,18 +1239,36 @@ export default function CreatePage() {
       }
 
       await addDoc(collection(firestore, 'videos'), newVideo)
+      setUploadProgress(100)
+      upsertPublishProgress({
+        id: publishId,
+        title,
+        progress: 100,
+        status: 'completed',
+        message: 'Publie',
+      })
 
       console.log('Video published successfully')
       
     } catch (error) {
       console.error("Error publishing video: ", error)
+      upsertPublishProgress({
+        id: publishId,
+        title,
+        progress: uploadProgress,
+        status: 'failed',
+        message: 'Echec',
+      })
       toast({
         title: 'Erreur de publication',
-        description: "Une erreur s'est produite. Veuillez réessayer.",
+        description: error instanceof Error ? error.message : "Une erreur s'est produite. Veuillez réessayer.",
         variant: 'destructive',
       })
     } finally {
       setIsPublishing(false)
+      window.setTimeout(() => {
+        removePublishProgress(publishId)
+      }, 12000)
     }
   }
 
@@ -1170,17 +1342,38 @@ export default function CreatePage() {
           <RotateCcw className="h-6 w-6" />
         </Button>
         
-        <div className="relative aspect-[9/16] w-full max-w-sm rounded-xl overflow-hidden shadow-2xl">
-          {recordedVideoUrl && <video
-            src={recordedVideoUrl}
-            className={cn(
-              "h-full w-full object-cover"
-            )}
-            style={{ filter: recordedFilter }}
-            autoPlay
-            playsInline
-            loop
-          />}
+        <div className="relative aspect-[9/16] w-full max-w-sm overflow-hidden rounded-xl bg-black shadow-2xl">
+          {mediaMode === 'photos' && photoPreviewUrls.length > 0 ? (
+            <>
+              <img
+                src={photoPreviewUrls[activePhotoIndex] || photoPreviewUrls[0]}
+                alt="Apercu publication"
+                className="h-full w-full object-cover"
+              />
+              {photoPreviewUrls.length > 1 && (
+                <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-1.5">
+                  {photoPreviewUrls.map((_, index) => (
+                    <button
+                      key={index}
+                      type="button"
+                      className={cn('h-2 w-2 rounded-full bg-white/40', activePhotoIndex === index && 'bg-primary')}
+                      onClick={() => setActivePhotoIndex(index)}
+                      aria-label={`Photo ${index + 1}`}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            recordedVideoUrl && <video
+              src={recordedVideoUrl}
+              className="h-full w-full object-cover"
+              style={{ filter: recordedFilter }}
+              autoPlay
+              playsInline
+              loop
+            />
+          )}
         </div>
 
         <div className="w-full max-w-sm space-y-4">
@@ -1261,16 +1454,37 @@ export default function CreatePage() {
   if (step === 'preview') {
     return (
       <div className="relative h-[100dvh] w-full bg-black">
-        {recordedVideoUrl && <video
-          src={recordedVideoUrl}
-          className={cn(
-              "h-full w-full object-cover"
-          )}
-          style={{ filter: recordedFilter }}
-          autoPlay
-          playsInline
-          loop
-        />}
+        {mediaMode === 'photos' && photoPreviewUrls.length > 0 ? (
+          <>
+            <img
+              src={photoPreviewUrls[activePhotoIndex] || photoPreviewUrls[0]}
+              alt="Apercu publication"
+              className="h-full w-full object-cover"
+            />
+            {photoPreviewUrls.length > 1 && (
+              <div className="absolute top-[calc(1rem+env(safe-area-inset-top))] left-1/2 z-20 flex -translate-x-1/2 gap-1.5">
+                {photoPreviewUrls.map((_, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    className={cn('h-2 w-8 rounded-full bg-white/35', activePhotoIndex === index && 'bg-primary')}
+                    onClick={() => setActivePhotoIndex(index)}
+                    aria-label={`Photo ${index + 1}`}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          recordedVideoUrl && <video
+            src={recordedVideoUrl}
+            className="h-full w-full object-cover"
+            style={{ filter: recordedFilter }}
+            autoPlay
+            playsInline
+            loop
+          />
+        )}
         <div className="absolute inset-0 bg-black/20"></div>
         <div className="absolute top-[calc(1rem+env(safe-area-inset-top))] left-[calc(1rem+env(safe-area-inset-left))] z-20">
             <Button 
@@ -1325,12 +1539,13 @@ export default function CreatePage() {
           <input
             ref={videoImportInputRef}
             type="file"
-            accept="video/*"
+            accept="video/*,image/*"
+            multiple
             className="hidden"
             onChange={(event) => {
-              const file = event.target.files?.[0]
-              if (file) {
-                handleImportVideo(file)
+              const files = event.target.files
+              if (files?.length) {
+                handleImportMedia(files)
               }
               event.currentTarget.value = ''
             }}
@@ -1635,7 +1850,7 @@ export default function CreatePage() {
               <div>
                 <h2 className="text-xl font-semibold text-white">Creer une video</h2>
                 <p className="mt-2 text-sm text-white/70">
-                  Enregistrez avec la camera ou importez une video depuis votre appareil.
+                  Enregistrez avec la camera ou importez une video ou plusieurs photos depuis votre appareil.
                 </p>
               </div>
               <div className="grid grid-cols-1 gap-3">
@@ -1643,7 +1858,8 @@ export default function CreatePage() {
                   Autoriser la camera
                 </Button>
                 <Button size="lg" variant="secondary" onClick={() => videoImportInputRef.current?.click()}>
-                  Importer une video
+                  <ImageIcon className="mr-2 h-5 w-5" />
+                  Importer media
                 </Button>
               </div>
             </div>

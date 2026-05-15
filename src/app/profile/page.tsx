@@ -12,7 +12,7 @@ import { useFirestore } from '@/firebase/provider'
 import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, updateDoc, where, writeBatch } from 'firebase/firestore'
 import { updateProfile } from 'firebase/auth'
 import type { User, Video } from '@/lib/types'
-import { Settings, UserPlus, Users, Heart, X, Play, Pause, Volume2, VolumeX, Share2, Copy, QrCode, MoreVertical, Trash2, Edit, Camera, Loader2, Eye } from 'lucide-react'
+import { Settings, UserPlus, Users, Heart, X, Play, Pause, Volume2, VolumeX, Share2, Copy, QrCode, MoreVertical, Trash2, Edit, Camera, Loader2, Eye, Images } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { uploadImageToCloudinary } from '@/lib/cloudinary'
 import { hasCreatorAccess, isAdminRole } from '@/lib/roles'
@@ -172,6 +172,7 @@ export default function ProfilePage() {
   const [userVideos, setUserVideos] = useState<Video[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null)
+  const [selectedMediaIndex, setSelectedMediaIndex] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [isMuted, setIsMuted] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -207,6 +208,7 @@ export default function ProfilePage() {
   const [followingCount, setFollowingCount] = useState<number | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const avatarInputRef = useRef<HTMLInputElement>(null)
+  const mediaDragRef = useRef<{ startX: number; startY: number; pointerId?: number; dragging: boolean } | null>(null)
   const cropGestureRef = useRef<{
     pointers: Map<number, { x: number; y: number }>
     startX: number
@@ -313,6 +315,33 @@ export default function ProfilePage() {
     setQrCodeUrl(`https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encoded}`)
   }, [profileUrl])
 
+  const selectedPhotoItems = selectedVideo
+    ? selectedVideo.mediaItems?.filter((item) => item.type === 'image')?.length
+      ? selectedVideo.mediaItems.filter((item) => item.type === 'image')
+      : (selectedVideo.imageUrls || []).map((url) => ({ type: 'image' as const, url, thumbnailUrl: url }))
+    : []
+  const selectedIsPhotoPost = Boolean(
+    selectedVideo && (selectedVideo.mediaType === 'photos' || selectedPhotoItems.length > 0)
+  )
+  const selectedPhotoUrl =
+    selectedPhotoItems[selectedMediaIndex]?.url ||
+    selectedVideo?.imageUrls?.[selectedMediaIndex] ||
+    selectedVideo?.thumbnailUrl ||
+    ''
+
+  const goToSelectedPhoto = (index: number) => {
+    setSelectedMediaIndex(Math.max(0, Math.min(selectedPhotoItems.length - 1, index)))
+  }
+
+  useEffect(() => {
+    if (!selectedVideo || !selectedIsPhotoPost) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowLeft') goToSelectedPhoto(selectedMediaIndex - 1)
+      if (event.key === 'ArrowRight') goToSelectedPhoto(selectedMediaIndex + 1)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [selectedMediaIndex, selectedIsPhotoPost, selectedPhotoItems.length, selectedVideo])
 
   if (userLoading || loading || !user || !userData) {
     return (
@@ -655,12 +684,14 @@ export default function ProfilePage() {
 
   const handleOpenVideo = (video: Video) => {
     setSelectedVideo(video)
+    setSelectedMediaIndex(0)
     setIsPlaying(true)
     setProgress(0)
   }
 
   const handleCloseVideo = () => {
     setSelectedVideo(null)
+    setSelectedMediaIndex(0)
     setIsPlaying(false)
     setProgress(0)
     if (videoRef.current) {
@@ -772,6 +803,32 @@ export default function ProfilePage() {
     if (!videoRef.current) return
     videoRef.current.muted = !videoRef.current.muted
     setIsMuted(videoRef.current.muted)
+  }
+
+  const handleSelectedMediaPointerDown = (event: any) => {
+    if (!selectedIsPhotoPost || selectedPhotoItems.length < 2) return
+    mediaDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      pointerId: event.pointerId,
+      dragging: true,
+    }
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+  }
+
+  const handleSelectedMediaPointerUp = (event: any) => {
+    const gesture = mediaDragRef.current
+    if (!gesture?.dragging) return
+    mediaDragRef.current = null
+    event.currentTarget.releasePointerCapture?.(gesture.pointerId)
+    const deltaX = event.clientX - gesture.startX
+    const deltaY = event.clientY - gesture.startY
+    if (Math.abs(deltaX) < 45 || Math.abs(deltaX) < Math.abs(deltaY) * 1.2) return
+    if (deltaX < 0) {
+      goToSelectedPhoto(selectedMediaIndex + 1)
+    } else {
+      goToSelectedPhoto(selectedMediaIndex - 1)
+    }
   }
 
   const totalVideoLikes = userVideos.reduce((total, video) => total + Number(video.likes || 0), 0)
@@ -931,6 +988,12 @@ export default function ProfilePage() {
                     <Eye className="h-3 w-3" />
                     <ClientFormattedNumber value={video.views || 0} />
                   </div>
+                  {(video.mediaType === 'photos' || (video.imageUrls?.length || 0) > 0) && (
+                    <div className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 rounded-full bg-black/65 px-2 py-0.5 text-[11px] text-white">
+                      <Images className="h-3 w-3" />
+                      <span>{video.mediaItems?.length || video.imageUrls?.length || 1}</span>
+                    </div>
+                  )}
                 </div>
                 <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                   <DropdownMenu>
@@ -983,29 +1046,70 @@ export default function ProfilePage() {
 
       {selectedVideo && (
         <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm">
-          <div className="absolute inset-0">
-            <video
-              ref={videoRef}
-              src={selectedVideo.videoUrl}
-              className="h-full w-full object-contain"
-              autoPlay
-              playsInline
-              muted={isMuted}
-              onTimeUpdate={handleTimeUpdate}
-              onLoadedMetadata={handleTimeUpdate}
-              onEnded={() => setIsPlaying(false)}
-            />
+          <div
+            className="absolute inset-0 touch-pan-y select-none"
+            onPointerDown={handleSelectedMediaPointerDown}
+            onPointerUp={handleSelectedMediaPointerUp}
+            onPointerCancel={() => {
+              mediaDragRef.current = null
+            }}
+          >
+            {selectedIsPhotoPost ? (
+              <>
+                <img
+                  src={selectedPhotoUrl}
+                  alt={selectedVideo.description || 'Publication'}
+                  className="h-full w-full object-contain"
+                  draggable={false}
+                />
+                {selectedPhotoItems.length > 1 && (
+                  <>
+                    <div className="absolute top-[calc(4.75rem+env(safe-area-inset-top))] left-1/2 z-10 flex -translate-x-1/2 gap-1.5">
+                      {selectedPhotoItems.map((_, index) => (
+                        <button
+                          key={index}
+                          type="button"
+                          className={`h-1.5 w-8 rounded-full ${selectedMediaIndex === index ? 'bg-primary' : 'bg-white/35'}`}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            goToSelectedPhoto(index)
+                          }}
+                          aria-label={`Afficher la photo ${index + 1}`}
+                        />
+                      ))}
+                    </div>
+                    <div className="absolute bottom-[calc(6rem+env(safe-area-inset-bottom))] left-1/2 z-10 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1 text-xs text-white">
+                      {selectedMediaIndex + 1}/{selectedPhotoItems.length}
+                    </div>
+                  </>
+                )}
+              </>
+            ) : (
+              <video
+                ref={videoRef}
+                src={selectedVideo.videoUrl}
+                className="h-full w-full object-contain"
+                autoPlay
+                playsInline
+                muted={isMuted}
+                onTimeUpdate={handleTimeUpdate}
+                onLoadedMetadata={handleTimeUpdate}
+                onEnded={() => setIsPlaying(false)}
+              />
+            )}
           </div>
 
           <div className="absolute top-[calc(1rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-10 flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="rounded-full h-11 w-11 text-white hover:bg-white/10"
-              onClick={handleToggleMute}
-            >
+            {!selectedIsPhotoPost && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="rounded-full h-11 w-11 text-white hover:bg-white/10"
+                onClick={handleToggleMute}
+              >
               {isMuted ? <VolumeX className="h-6 w-6" /> : <Volume2 className="h-6 w-6" />}
-            </Button>
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"
@@ -1018,6 +1122,7 @@ export default function ProfilePage() {
 
           <div className="absolute inset-x-0 bottom-[calc(1rem+env(safe-area-inset-bottom))] px-4">
             <div className="rounded-2xl bg-black/60 px-4 py-3 text-white backdrop-blur">
+              {!selectedIsPhotoPost && (
               <div className="flex items-center gap-3">
                 <Button
                   variant="ghost"
@@ -1043,6 +1148,7 @@ export default function ProfilePage() {
                   </div>
                 </div>
               </div>
+              )}
               <div className="mt-2 text-sm text-foreground/80 line-clamp-2">
                 {selectedVideo.description}
               </div>

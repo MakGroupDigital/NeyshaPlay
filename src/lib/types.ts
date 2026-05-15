@@ -71,6 +71,17 @@ export type Video = {
   id: string
   user: User
   userRef?: DocumentReference
+  mediaType?: 'video' | 'photos'
+  mediaItems?: Array<{
+    type: 'video' | 'image'
+    url: string
+    thumbnailUrl?: string
+    publicId?: string
+    width?: number
+    height?: number
+    duration?: number
+  }>
+  imageUrls?: string[]
   videoUrl: string
   thumbnailUrl: string
   description: string

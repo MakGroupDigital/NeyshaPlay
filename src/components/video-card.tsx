@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import type { Video } from '@/lib/types'
-import { Heart, MessageCircle, Send, Music, Volume2, VolumeX, Lock, Wallet, ShoppingBag, Bookmark } from 'lucide-react'
+import { Heart, MessageCircle, Send, Music, Volume2, VolumeX, Lock, Wallet, ShoppingBag, Bookmark, Images } from 'lucide-react'
 import { ClientFormattedNumber } from './client-formatted-number'
 import { useFirestore, useUser } from '@/firebase'
 import { useRouter } from 'next/navigation'
@@ -73,9 +73,19 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
   const [walletBalance, setWalletBalance] = useState(0)
   const [likeBursts, setLikeBursts] = useState<Array<{ id: string; x: number; y: number }>>([])
   const [showDetails, setShowDetails] = useState(true)
+  const [activeMediaIndex, setActiveMediaIndex] = useState(0)
 
+  const cardRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const viewRecordedRef = useRef(false)
+  const photoDragRef = useRef<{ startX: number; startY: number; pointerId?: number; dragging: boolean } | null>(null)
+  const suppressNextCardClickRef = useRef(false)
+  const mediaItems = (video.mediaItems && video.mediaItems.length > 0)
+    ? video.mediaItems
+    : video.imageUrls && video.imageUrls.length > 0
+      ? video.imageUrls.map((url) => ({ type: 'image' as const, url, thumbnailUrl: url }))
+      : [{ type: 'video' as const, url: video.videoUrl, thumbnailUrl: video.thumbnailUrl }]
+  const isPhotoPost = video.mediaType === 'photos' || mediaItems.some((item) => item.type === 'image')
   const numericPrice = typeof video.price === 'number' ? video.price : Number(video.price || 0)
   const isPaidContent = Boolean((video.isPaid ?? false) || numericPrice > 0)
   const locked = isPaidContent && isLocked && !localUnlocked
@@ -83,6 +93,49 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
   const showFailed = locked && pendingStatus === 'failed'
   const displayPrice = Number.isFinite(numericPrice) ? numericPrice : 0
   const displayCurrency = video.currency ?? 'USD'
+
+  const goToPhoto = (nextIndex: number) => {
+    setActiveMediaIndex(Math.max(0, Math.min(mediaItems.length - 1, nextIndex)))
+  }
+
+  const goToPreviousPhoto = () => goToPhoto(activeMediaIndex - 1)
+  const goToNextPhoto = () => goToPhoto(activeMediaIndex + 1)
+
+  const handlePhotoPointerDown = (event: any) => {
+    if (!isPhotoPost || mediaItems.length < 2) return
+    photoDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      pointerId: event.pointerId,
+      dragging: true,
+    }
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+  }
+
+  const handlePhotoPointerUp = (event: any) => {
+    const gesture = photoDragRef.current
+    if (!gesture?.dragging) return
+    photoDragRef.current = null
+    event.currentTarget.releasePointerCapture?.(gesture.pointerId)
+    const deltaX = event.clientX - gesture.startX
+    const deltaY = event.clientY - gesture.startY
+    if (Math.abs(deltaX) < 45 || Math.abs(deltaX) < Math.abs(deltaY) * 1.2) return
+    event.stopPropagation()
+    event.preventDefault()
+    suppressNextCardClickRef.current = true
+    window.setTimeout(() => {
+      suppressNextCardClickRef.current = false
+    }, 0)
+    if (deltaX < 0) {
+      goToNextPhoto()
+    } else {
+      goToPreviousPhoto()
+    }
+  }
+
+  const handlePhotoPointerCancel = () => {
+    photoDragRef.current = null
+  }
 
   useEffect(() => {
     setLikes(video.likes)
@@ -312,7 +365,12 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
     onMuteToggle?.(!globalMuted)
   }
   
-  const handleVideoClick = () => {
+  const handleVideoClick = (event?: React.MouseEvent) => {
+    if (suppressNextCardClickRef.current) {
+      event?.stopPropagation()
+      suppressNextCardClickRef.current = false
+      return
+    }
     if (locked) {
       setShowPaySheet(true)
       return
@@ -328,8 +386,9 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
   }, [globalMuted, locked])
 
   useEffect(() => {
+    const observedElement = isPhotoPost ? cardRef.current : videoRef.current;
     const videoElement = videoRef.current;
-    if (!videoElement || locked) return;
+    if (!observedElement || locked) return;
 
     const observer = new IntersectionObserver(
       ([entry]) => {
@@ -343,12 +402,12 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
                 viewRecordedRef.current = false
               })
             }
-            videoElement.play().catch(() => {
+            videoElement?.play().catch(() => {
                 // Autoplay was prevented.
             });
-            setIsPlaying(true);
+            setIsPlaying(!isPhotoPost);
         } else {
-            videoElement.pause();
+            videoElement?.pause();
             setIsPlaying(false);
         }
       },
@@ -359,14 +418,14 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
       }
     );
 
-    observer.observe(videoElement);
+    observer.observe(observedElement);
 
     return () => {
-      if (videoElement) {
-        observer.unobserve(videoElement);
+      if (observedElement) {
+        observer.unobserve(observedElement);
       }
     };
-  }, [firestore, locked, onFeedSignal, video]);
+  }, [firestore, isPhotoPost, locked, onFeedSignal, video]);
 
   useEffect(() => {
     if (locked && videoRef.current) {
@@ -530,7 +589,7 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
   }
 
   return (
-    <Card className="relative h-[100dvh] w-full snap-start snap-always overflow-hidden rounded-none border-0 bg-black shadow-lg" onClick={handleVideoClick}>
+    <Card ref={cardRef} className="relative h-[100dvh] w-full snap-start snap-always overflow-hidden rounded-none border-0 bg-black shadow-lg" onClick={handleVideoClick}>
       {likeBursts.map((burst) => (
         <div
           key={burst.id}
@@ -545,6 +604,54 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
         </div>
       ))}
       {!locked ? (
+        isPhotoPost ? (
+          <div
+            className="absolute inset-0 touch-pan-y select-none"
+            onPointerDown={handlePhotoPointerDown}
+            onPointerUp={handlePhotoPointerUp}
+            onPointerCancel={handlePhotoPointerCancel}
+            onClick={(event) => {
+              if (suppressNextCardClickRef.current) {
+                event.stopPropagation()
+                event.preventDefault()
+                suppressNextCardClickRef.current = false
+              }
+            }}
+          >
+            <img
+              src={mediaItems[activeMediaIndex]?.url || video.thumbnailUrl || video.videoUrl}
+              alt={video.description || 'Publication'}
+              className="h-full w-full object-cover transition-opacity duration-200"
+              draggable={false}
+              data-ai-hint="photo post"
+            />
+            {mediaItems.length > 1 && (
+              <>
+                <div className="absolute top-[calc(5rem+env(safe-area-inset-top))] left-1/2 z-20 flex -translate-x-1/2 gap-1.5">
+                  {mediaItems.map((_, index) => (
+                    <button
+                      key={index}
+                      type="button"
+                      className={cn('h-1.5 w-8 rounded-full bg-white/35', activeMediaIndex === index && 'bg-primary')}
+                      onPointerDown={(event) => {
+                        event.stopPropagation()
+                      }}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        setActiveMediaIndex(index)
+                      }}
+                      aria-label={`Afficher la photo ${index + 1}`}
+                    />
+                  ))}
+                </div>
+                <div className="absolute right-4 top-[calc(7rem+env(safe-area-inset-top))] z-20 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-1 text-xs text-white">
+                  <Images className="h-3.5 w-3.5" />
+                  <span>{activeMediaIndex + 1}/{mediaItems.length}</span>
+                </div>
+              </>
+            )}
+          </div>
+        ) : (
         <video
           ref={videoRef}
           src={video.videoUrl}
@@ -557,6 +664,7 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
           muted={globalMuted}
           data-ai-hint="short-form video"
         />
+        )
       ) : (
         <div className="absolute inset-0">
           {video.thumbnailUrl ? (
@@ -631,10 +739,12 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
               {video.user.name || video.user.username || 'Utilisateur'}
             </Link>
             <p className="text-sm text-foreground/80">{video.description}</p>
-            <div className="flex items-center gap-2 mt-2 text-sm text-foreground/80">
-              <Music className="w-4 h-4" />
-              <span>{video.song}</span>
-            </div>
+            {!isPhotoPost && video.song && (
+              <div className="flex items-center gap-2 mt-2 text-sm text-foreground/80">
+                <Music className="w-4 h-4" />
+                <span>{video.song}</span>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -648,6 +758,7 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
           </Avatar>
         </Link>
 
+        {!isPhotoPost && (
 	        <div className="flex flex-col items-center gap-1">
 	          <Button
 	            variant="ghost"
@@ -658,6 +769,7 @@ export function VideoCard({ video, isLocked = false, onPay, onFeedSignal, global
             {globalMuted ? <VolumeX className="h-20 w-20" /> : <Volume2 className="h-20 w-20" />}
           </Button>
         </div>
+        )}
 
         <div className="flex flex-col items-center gap-1">
           <Button
