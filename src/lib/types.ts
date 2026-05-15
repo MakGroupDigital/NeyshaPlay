@@ -54,6 +54,8 @@ export type Transaction = {
     providerLogId?: string
     phoneNumber?: string
     email?: string
+    paymentOperator?: string
+    paymentCurrency?: string
     refunded?: boolean
     providerStatus?: string
     providerPayload?: Record<string, any> | null

@@ -28,6 +28,7 @@ import { hasCreatorAccess } from '@/lib/roles'
 const MIN_DEPOSIT_AMOUNT = 10
 const MIN_WITHDRAW_AMOUNT = 10
 type DepositMethod = 'maxicash' | 'paypal'
+type DepositOperator = 'airtel' | 'mpesa' | 'orange' | 'africell'
 
 type WalletState = {
   wallet: Wallet | null
@@ -37,6 +38,18 @@ type WalletState = {
 const emptyState: WalletState = {
   wallet: null,
   transactions: [],
+}
+
+function detectDepositOperator(phoneNumber: string): DepositOperator | null {
+  const digits = phoneNumber.replace(/\D/g, '')
+  const local = digits.startsWith('243') ? digits.slice(3) : digits.startsWith('0') ? digits.slice(1) : digits
+  const prefix = local.slice(0, 2)
+
+  if (['81', '82', '83'].includes(prefix)) return 'mpesa'
+  if (['97', '98', '99'].includes(prefix)) return 'airtel'
+  if (['84', '85', '89'].includes(prefix)) return 'orange'
+  if (['90', '91'].includes(prefix)) return 'africell'
+  return null
 }
 
 export default function WalletPage() {
@@ -54,6 +67,7 @@ export default function WalletPage() {
   const [depositAmount, setDepositAmount] = useState('')
   const [depositPhone, setDepositPhone] = useState('')
   const [depositMethod, setDepositMethod] = useState<DepositMethod>('maxicash')
+  const [depositOperator, setDepositOperator] = useState<DepositOperator>('mpesa')
   const [isDepositing, setIsDepositing] = useState(false)
 
   const userDocRef = useMemo(() => {
@@ -283,6 +297,51 @@ export default function WalletPage() {
     }
   }, [balance, fetchWallet, isCreator, kycApproved, toast, user, withdrawAmount, withdrawPhone])
 
+  const pollMaxiCashDeposit = useCallback(
+    async (transactionId: string, reference: string) => {
+      if (!user) return
+
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 8000))
+
+        try {
+          const response = await fetch('/api/maxicash/deposit/status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: user.uid,
+              transactionId,
+              reference,
+            }),
+          })
+          const data = await response.json()
+
+          if (data?.status === 'completed') {
+            await fetchWallet()
+            toast({
+              title: 'Depot confirme',
+              description: 'Votre portefeuille a ete credite.',
+            })
+            return
+          }
+
+          if (data?.status === 'failed') {
+            await fetchWallet()
+            toast({
+              title: 'Depot echoue',
+              description: data?.error || 'Le paiement Mobile Money n a pas ete confirme.',
+              variant: 'destructive',
+            })
+            return
+          }
+        } catch (error) {
+          console.warn('MaxiCash deposit status check failed:', error)
+        }
+      }
+    },
+    [fetchWallet, toast, user]
+  )
+
   const handleDeposit = useCallback(async () => {
     if (!user) return
     const amount = Number(depositAmount)
@@ -290,6 +349,14 @@ export default function WalletPage() {
       toast({
         title: 'Montant invalide',
         description: `Le depot minimum est de ${MIN_DEPOSIT_AMOUNT} USD.`,
+        variant: 'destructive',
+      })
+      return
+    }
+    if (depositMethod === 'maxicash' && !depositPhone.trim()) {
+      toast({
+        title: 'Numero requis',
+        description: 'Entrez le numero Mobile Money.',
         variant: 'destructive',
       })
       return
@@ -308,24 +375,55 @@ export default function WalletPage() {
           userId: user.uid,
           amount,
           phoneNumber: depositPhone.trim(),
-          email: user.email || '',
+          operator: depositOperator,
+          currency: 'USD',
         }),
       })
       const data = await response.json()
-      if (!response.ok || !data?.redirectUrl) {
+
+      if (depositMethod === 'paypal') {
+        if (!response.ok || !data?.redirectUrl) {
+          throw new Error(data?.error || 'Depot PayPal impossible')
+        }
+
+        window.location.href = data.redirectUrl
+        return
+      }
+
+      if (!response.ok) {
         throw new Error(data?.error || 'Depot Mobile Money impossible')
       }
 
-      window.location.href = data.redirectUrl
+      await fetchWallet()
+      setShowDepositDialog(false)
+      setDepositAmount('')
+      setDepositPhone('')
+
+      if (data?.status === 'completed') {
+        toast({
+          title: 'Depot confirme',
+          description: 'Votre portefeuille a ete credite.',
+        })
+        return
+      }
+
+      toast({
+        title: 'Confirmation envoyee',
+        description: 'Validez le paiement sur votre telephone.',
+      })
+      if (data?.transactionId && data?.reference) {
+        void pollMaxiCashDeposit(data.transactionId, data.reference)
+      }
     } catch (error: any) {
       toast({
         title: 'Depot echoue',
         description: error?.message || 'Veuillez reessayer.',
         variant: 'destructive',
       })
+    } finally {
       setIsDepositing(false)
     }
-  }, [depositAmount, depositMethod, depositPhone, toast, user])
+  }, [depositAmount, depositMethod, depositOperator, depositPhone, fetchWallet, pollMaxiCashDeposit, toast, user])
 
   if (userLoading || loading) {
     return (
@@ -565,19 +663,40 @@ export default function WalletPage() {
               />
             </div>
             {depositMethod === 'maxicash' && (
-              <div className="grid gap-2">
-                <Label htmlFor="deposit-phone">Numero Mobile Money</Label>
-                <Input
-                  id="deposit-phone"
-                  value={depositPhone}
-                  onChange={(e) => setDepositPhone(e.target.value)}
-                  placeholder="+243..."
-                />
-              </div>
+              <>
+                <div className="grid gap-2">
+                  <Label htmlFor="deposit-phone">Numero Mobile Money</Label>
+                  <Input
+                    id="deposit-phone"
+                    value={depositPhone}
+                    onChange={(e) => {
+                      const nextPhone = e.target.value
+                      setDepositPhone(nextPhone)
+                      const detectedOperator = detectDepositOperator(nextPhone)
+                      if (detectedOperator) setDepositOperator(detectedOperator)
+                    }}
+                    placeholder="+243..."
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="deposit-operator">Operateur</Label>
+                  <select
+                    id="deposit-operator"
+                    value={depositOperator}
+                    onChange={(e) => setDepositOperator(e.target.value as DepositOperator)}
+                    className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    <option value="mpesa">M-Pesa</option>
+                    <option value="airtel">Airtel Money</option>
+                    <option value="orange">Orange Money</option>
+                    <option value="africell">Afrimoney</option>
+                  </select>
+                </div>
+              </>
             )}
             <Button className="w-full" onClick={handleDeposit} disabled={isDepositing}>
               {isDepositing
-                ? 'Redirection...'
+                ? depositMethod === 'paypal' ? 'Redirection...' : 'Verification...'
                 : `Continuer avec ${depositMethod === 'paypal' ? 'PayPal' : 'Mobile Money'}`}
             </Button>
           </div>

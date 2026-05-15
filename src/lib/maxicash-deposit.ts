@@ -38,7 +38,7 @@ export async function finalizeMaxiCashDeposit({
     }
   }
 
-  if (transaction.status !== 'pending') {
+  if (transaction.status !== 'pending' && status !== 'completed') {
     return {
       alreadyProcessed: true,
       newBalance: Number(wallet.balance || 0),
@@ -64,7 +64,8 @@ export async function finalizeMaxiCashDeposit({
     },
   }
 
-  const nextBalance = status === 'completed' ? Number(wallet.balance || 0) + amount : Number(wallet.balance || 0)
+  const shouldCredit = status === 'completed' && transaction.status !== 'completed'
+  const nextBalance = shouldCredit ? Number(wallet.balance || 0) + amount : Number(wallet.balance || 0)
   await updateDoc(walletRef, {
     balance: nextBalance,
     updatedAt: serverTimestamp(),
@@ -83,9 +84,12 @@ export async function createPendingMaxiCashDeposit(input: {
   transactionId: string
   amount: number
   reference: string
-  logId: string
+  logId?: string
   phoneNumber?: string
   email?: string
+  operator?: string
+  currency?: string
+  providerPayload?: Record<string, any> | null
 }) {
   const walletRef = await getWalletRefByUserId(input.userId)
   const walletSnap = await getDoc(walletRef)
@@ -101,9 +105,12 @@ export async function createPendingMaxiCashDeposit(input: {
     metadata: {
       depositMethod: 'maxicash',
       providerReference: input.reference,
-      providerLogId: input.logId,
+      providerLogId: input.logId || null,
       phoneNumber: input.phoneNumber || null,
       email: input.email || null,
+      paymentOperator: input.operator || null,
+      paymentCurrency: input.currency || 'USD',
+      providerPayload: input.providerPayload || null,
     },
   }
 
